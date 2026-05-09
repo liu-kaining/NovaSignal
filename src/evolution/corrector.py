@@ -83,7 +83,7 @@ class PromptCorrector:
         current_content = self._prompt_path.read_text(encoding="utf-8")
 
         try:
-            self._r2._put_object(
+            self._r2.upload_raw(
                 archive_key,
                 current_content.encode("utf-8"),
                 content_type="text/markdown",

@@ -51,10 +51,12 @@ def run_pipeline(
     # Phase 1: Discovery
     fmp = _create_fmp_client()
     discovered = _discover_symbols(fmp, lookback_days, symbols)
+    symbol_names = [e["symbol"] for e in discovered]
 
     if mode == "discovery-only":
         LOGGER.info("Discovery-only mode: found %d symbols", len(discovered))
-        return {"mode": mode, "symbols": discovered, "results": []}
+        _persist_discovery(discovered)
+        return {"mode": mode, "symbols": symbol_names, "results": []}
 
     # Phase 2: Load prompt template
     prompt_content = _load_prompt(prompt_path)
@@ -66,7 +68,8 @@ def run_pipeline(
 
     results = asyncio.run(
         _run_all_agents(
-            symbols=discovered,
+            discovery_entries=discovered,
+            fmp=fmp,
             prompt_content=prompt_content,
             sandbox_mgr=sandbox_mgr,
             r2=r2,
@@ -77,7 +80,7 @@ def run_pipeline(
 
     summary = {
         "mode": mode,
-        "symbols": discovered,
+        "symbols": symbol_names,
         "results": results,
         "success_count": sum(1 for r in results if r.get("success")),
         "failure_count": sum(1 for r in results if not r.get("success")),
@@ -96,7 +99,8 @@ def run_pipeline(
 
 async def _run_all_agents(
     *,
-    symbols: list[str],
+    discovery_entries: list[dict[str, Any]],
+    fmp: FMPClient,
     prompt_content: str,
     sandbox_mgr: SandboxManager,
     r2: R2Client | None,
@@ -107,21 +111,23 @@ async def _run_all_agents(
     semaphore = asyncio.Semaphore(concurrency)
     tasks = [
         _run_single_agent(
-            symbol=sym,
+            entry=entry,
+            fmp=fmp,
             prompt_content=prompt_content,
             sandbox_mgr=sandbox_mgr,
             r2=r2,
             timeout=timeout,
             semaphore=semaphore,
         )
-        for sym in symbols
+        for entry in discovery_entries
     ]
     return await asyncio.gather(*tasks)
 
 
 async def _run_single_agent(
     *,
-    symbol: str,
+    entry: dict[str, Any],
+    fmp: FMPClient,
     prompt_content: str,
     sandbox_mgr: SandboxManager,
     r2: R2Client | None,
@@ -129,14 +135,20 @@ async def _run_single_agent(
     semaphore: asyncio.Semaphore,
 ) -> dict[str, Any]:
     """Execute a single agent run within a sandbox."""
+    symbol = entry["symbol"]
     async with semaphore:
         context = None
         try:
-            raw_data = {"symbol": symbol, "timestamp": date.today().isoformat()}
+            raw_data = _build_raw_data(entry, fmp)
             context = sandbox_mgr.create(symbol, raw_data, prompt_content)
 
+            agent_instruction = (
+                "Read prompt.md and raw_data.json in your working directory. "
+                "Follow the instructions in prompt.md to analyze the data in raw_data.json. "
+                "Produce the output files as specified."
+            )
             result = await invoke_agent(
-                prompt_content,
+                agent_instruction,
                 working_dir=context.sandbox_dir,
                 timeout_seconds=timeout,
                 env_vars={"ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", "")},
@@ -169,17 +181,65 @@ async def _run_single_agent(
 
 def _discover_symbols(
     fmp: FMPClient, lookback_days: int, override: list[str] | None
-) -> list[str]:
-    """Discover symbols from FMP IPO calendar or use override list."""
+) -> list[dict[str, Any]]:
+    """Discover symbols with IPO data from FMP calendar or use override list.
+
+    Returns a list of dicts with at minimum a 'symbol' key plus any available
+    IPO calendar metadata.
+    """
     if override:
-        return [s.upper() for s in override]
+        return [{"symbol": s.upper()} for s in override]
 
     today = date.today()
     from_date = today - timedelta(days=lookback_days)
     entries = fmp.get_ipo_calendar(from_date, today)
-    symbols = [e["symbol"] for e in entries if e.get("symbol")]
-    LOGGER.info("Discovered %d symbols from IPO calendar", len(symbols))
-    return symbols
+    discovered = [e for e in entries if e.get("symbol")]
+    LOGGER.info("Discovered %d symbols from IPO calendar", len(discovered))
+    return discovered
+
+
+def _build_raw_data(entry: dict[str, Any], fmp: FMPClient) -> dict[str, Any]:
+    """Build comprehensive raw_data for the agent sandbox.
+
+    Enriches the discovery entry with fundraising data from FMP.
+    """
+    symbol = entry["symbol"]
+    raw_data: dict[str, Any] = {
+        "symbol": symbol,
+        "timestamp": date.today().isoformat(),
+        "ipo_data": {
+            k: v for k, v in entry.items() if k != "symbol"
+        },
+    }
+
+    # Attempt to fetch fundraising data (non-fatal if unavailable)
+    cik = entry.get("cik")
+    if cik:
+        try:
+            raw_data["fundraising"] = fmp.get_fundraising(cik)
+        except Exception as exc:
+            LOGGER.warning("Could not fetch fundraising for %s: %s", symbol, exc)
+            raw_data["fundraising"] = []
+    else:
+        raw_data["fundraising"] = []
+
+    return raw_data
+
+
+def _persist_discovery(entries: list[dict[str, Any]]) -> None:
+    """Write discovery results to a local JSON file for downstream consumption."""
+    output_path = Path("discovery_output.json")
+    payload = {
+        "discovery_date": date.today().isoformat(),
+        "count": len(entries),
+        "symbols": [e["symbol"] for e in entries],
+        "entries": entries,
+    }
+    output_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, default=str),
+        encoding="utf-8",
+    )
+    LOGGER.info("Persisted discovery results to %s (%d entries)", output_path, len(entries))
 
 
 def _load_prompt(path: str | Path) -> str:

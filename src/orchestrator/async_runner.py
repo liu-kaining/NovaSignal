@@ -39,7 +39,7 @@ async def invoke_agent(
     timeout_seconds: float = 300,
     agent_command: str = "claude --print --dangerously-skip-permissions",
     env_vars: dict[str, str] | None = None,
-    retry_attempts: int = 2,
+    retry_attempts: int = 3,
     retry_min_wait_seconds: float = 5,
     retry_max_wait_seconds: float = 30,
 ) -> AgentResult:

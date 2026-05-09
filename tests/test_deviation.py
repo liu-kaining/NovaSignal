@@ -20,12 +20,15 @@ class DeviationCalculatorTest(unittest.TestCase):
         r2.download_file.return_value = json.dumps(metrics).encode()
         fmp.get_stock_price_historical.return_value = [{"close": 95.0}]
 
+        # T+30: metrics_date=2026-01-15, should fetch price for 2026-02-14
         result = calc.evaluate("AAPL", "2026-01-15")
 
         self.assertTrue(result["within_threshold"])
         self.assertAlmostEqual(result["deviation"], (100 - 95) / 95, places=5)
         self.assertEqual(result["predicted_price"], 100.0)
         self.assertEqual(result["actual_price"], 95.0)
+        # Verify T+30 date was used for price fetch
+        fmp.get_stock_price_historical.assert_called_with("AAPL", "2026-02-14", "2026-02-14")
 
     def test_evaluate_exceeds_threshold(self):
         calc, fmp, r2 = self._make_calculator(threshold=0.05)
@@ -108,8 +111,8 @@ class DeviationCalculatorTest(unittest.TestCase):
         key = calc.save_history(results)
 
         self.assertEqual(key, "state/evolution/deviation_history.json")
-        r2._put_object.assert_called_once()
-        call_args = r2._put_object.call_args
+        r2.upload_raw.assert_called_once()
+        call_args = r2.upload_raw.call_args
         body = json.loads(call_args[0][1].decode())
         self.assertEqual(len(body), 1)
 
@@ -121,7 +124,7 @@ class DeviationCalculatorTest(unittest.TestCase):
         new_results = [{"symbol": "NEW", "deviation": 0.1}]
         calc.save_history(new_results)
 
-        call_args = r2._put_object.call_args
+        call_args = r2.upload_raw.call_args
         body = json.loads(call_args[0][1].decode())
         self.assertEqual(len(body), 2)
         self.assertEqual(body[0]["symbol"], "OLD")

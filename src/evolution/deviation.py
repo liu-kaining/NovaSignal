@@ -34,11 +34,11 @@ class DeviationCalculator:
         self._r2 = r2
         self._threshold = threshold
 
-    def evaluate(self, symbol: str, metrics_date: str) -> dict[str, Any]:
+    def evaluate(self, symbol: str, metrics_date: str, *, lookback_offset_days: int = 30) -> dict[str, Any]:
         """Evaluate deviation for a single symbol on a given date.
 
-        Compares the predicted price/confidence from stored metrics against
-        the actual stock price on that date.
+        Compares the predicted price from stored metrics against the actual
+        stock price T+30 days after the analysis date.
         """
         LOGGER.info("Evaluating deviation for %s on %s", symbol, metrics_date)
 
@@ -49,7 +49,10 @@ class DeviationCalculator:
                 f"No predicted_price in metrics for {symbol} on {metrics_date}"
             )
 
-        actual_price = self._fetch_actual_price(symbol, metrics_date)
+        # T+30: compare against price 30 days after the analysis date
+        analysis_date = date.fromisoformat(metrics_date)
+        target_date = analysis_date + timedelta(days=lookback_offset_days)
+        actual_price = self._fetch_actual_price(symbol, target_date.isoformat())
         deviation = self._calculate_deviation(predicted_price, actual_price)
 
         result = {
@@ -103,7 +106,7 @@ class DeviationCalculator:
         history.extend(results)
 
         body = json.dumps(history, indent=2, ensure_ascii=False).encode("utf-8")
-        self._r2._put_object(
+        self._r2.upload_raw(
             self.HISTORY_KEY, body, content_type="application/json"
         )
         LOGGER.info("Saved %d entries to deviation history", len(results))

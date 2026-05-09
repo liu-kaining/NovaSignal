@@ -89,8 +89,8 @@ class PromptCorrectorTest(unittest.TestCase):
 
         corrector.apply_correction(correction)
 
-        r2._put_object.assert_called_once()
-        archive_key = r2._put_object.call_args[0][0]
+        r2.upload_raw.assert_called_once()
+        archive_key = r2.upload_raw.call_args[0][0]
         self.assertTrue(archive_key.startswith("state/evolution/prompt_versions/"))
         self.assertTrue(archive_key.endswith("_ipo_v1_template.md"))
 
@@ -106,7 +106,7 @@ class PromptCorrectorTest(unittest.TestCase):
 
     def test_apply_correction_r2_failure_raises(self):
         corrector, r2, _ = self._make_corrector()
-        r2._put_object.side_effect = R2StorageError("upload failed")
+        r2.upload_raw.side_effect = R2StorageError("upload failed")
 
         with self.assertRaises(CorrectionError) as ctx:
             corrector.apply_correction({

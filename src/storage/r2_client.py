@@ -53,6 +53,7 @@ class R2Client:
                 endpoint_url=self._endpoint_url,
                 aws_access_key_id=self._access_key_id,
                 aws_secret_access_key=self._secret_access_key,
+                region_name="auto",
             )
 
         self._retryer = Retrying(
@@ -119,6 +120,11 @@ class R2Client:
                         keys.append(obj["Key"])
                 return keys
         raise R2StorageError(f"Failed to list objects with prefix {prefix}")
+
+    def upload_raw(self, key: str, body: bytes, *, content_type: str = "application/octet-stream") -> str:
+        """Upload raw bytes to an arbitrary key. Returns the object key."""
+        self._put_object(key, body, content_type=content_type)
+        return key
 
     def _put_object(self, key: str, body: bytes, *, content_type: str) -> None:
         """Upload bytes to R2 with retry."""

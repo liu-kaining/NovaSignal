@@ -8,27 +8,62 @@ from src.orchestrator.run_pipeline import (
     PipelineError,
     _discover_symbols,
     _load_prompt,
+    _build_raw_data,
     run_pipeline,
 )
 
 
 class DiscoverSymbolsTest(unittest.TestCase):
-    def test_override_returns_uppercased(self):
+    def test_override_returns_uppercased_dicts(self):
         fmp = MagicMock()
         result = _discover_symbols(fmp, 7, ["aapl", "tsla"])
-        self.assertEqual(result, ["AAPL", "TSLA"])
+        self.assertEqual(result, [{"symbol": "AAPL"}, {"symbol": "TSLA"}])
         fmp.get_ipo_calendar.assert_not_called()
 
     def test_fetches_from_fmp_when_no_override(self):
         fmp = MagicMock()
         fmp.get_ipo_calendar.return_value = [
-            {"symbol": "NOVA", "date": "2026-01-01"},
+            {"symbol": "NOVA", "date": "2026-01-01", "company": "Nova Inc"},
             {"symbol": "STAR", "date": "2026-01-02"},
             {"date": "2026-01-03"},  # no symbol - skipped
         ]
         result = _discover_symbols(fmp, 7, None)
-        self.assertEqual(result, ["NOVA", "STAR"])
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["symbol"], "NOVA")
+        self.assertEqual(result[0]["company"], "Nova Inc")
         fmp.get_ipo_calendar.assert_called_once()
+
+
+class BuildRawDataTest(unittest.TestCase):
+    def test_builds_data_with_cik(self):
+        fmp = MagicMock()
+        fmp.get_fundraising.return_value = [{"round": "series-a"}]
+        entry = {"symbol": "TEST", "cik": "0001234567", "exchange": "NASDAQ"}
+
+        result = _build_raw_data(entry, fmp)
+
+        self.assertEqual(result["symbol"], "TEST")
+        self.assertIn("timestamp", result)
+        self.assertEqual(result["ipo_data"]["exchange"], "NASDAQ")
+        self.assertEqual(result["fundraising"], [{"round": "series-a"}])
+        fmp.get_fundraising.assert_called_once_with("0001234567")
+
+    def test_builds_data_without_cik(self):
+        fmp = MagicMock()
+        entry = {"symbol": "NOCIK", "date": "2026-01-01"}
+
+        result = _build_raw_data(entry, fmp)
+
+        self.assertEqual(result["fundraising"], [])
+        fmp.get_fundraising.assert_not_called()
+
+    def test_fundraising_failure_non_fatal(self):
+        fmp = MagicMock()
+        fmp.get_fundraising.side_effect = Exception("API error")
+        entry = {"symbol": "ERR", "cik": "000111"}
+
+        result = _build_raw_data(entry, fmp)
+        self.assertEqual(result["fundraising"], [])
 
 
 class LoadPromptTest(unittest.TestCase):
@@ -49,8 +84,9 @@ class RunPipelineTest(unittest.TestCase):
         with self.assertRaises(PipelineError):
             run_pipeline(mode="invalid")
 
+    @patch("src.orchestrator.run_pipeline._persist_discovery")
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
-    def test_discovery_only_mode(self, mock_fmp_factory):
+    def test_discovery_only_mode(self, mock_fmp_factory, mock_persist):
         fmp = MagicMock()
         fmp.get_ipo_calendar.return_value = [
             {"symbol": "AAPL", "date": "2026-01-01"},
@@ -61,6 +97,7 @@ class RunPipelineTest(unittest.TestCase):
         self.assertEqual(result["mode"], "discovery-only")
         self.assertEqual(result["symbols"], ["AAPL"])
         self.assertEqual(result["results"], [])
+        mock_persist.assert_called_once()
 
     @patch("src.orchestrator.run_pipeline._create_r2_client")
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
@@ -69,6 +106,7 @@ class RunPipelineTest(unittest.TestCase):
     def test_production_mode_full_flow(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory, mock_r2_factory):
         # Setup FMP
         fmp = MagicMock()
+        fmp.get_fundraising.return_value = []
         mock_fmp_factory.return_value = fmp
 
         # Setup sandbox
@@ -114,6 +152,7 @@ class RunPipelineTest(unittest.TestCase):
     @patch("src.orchestrator.run_pipeline.SandboxManager")
     def test_dev_mode_skips_upload(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory):
         fmp = MagicMock()
+        fmp.get_fundraising.return_value = []
         mock_fmp_factory.return_value = fmp
 
         mock_sandbox = MagicMock()
@@ -145,6 +184,7 @@ class RunPipelineTest(unittest.TestCase):
         from src.orchestrator.async_runner import AgentRunError
 
         fmp = MagicMock()
+        fmp.get_fundraising.return_value = []
         mock_fmp_factory.return_value = fmp
 
         mock_sandbox = MagicMock()
