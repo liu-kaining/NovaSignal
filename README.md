@@ -46,25 +46,44 @@ npm install -g @anthropic-ai/claude-code
 
 ### 2. 环境变量配置
 
-在根目录创建 `.env` 文件，或在 GitHub Secrets 中配置以下核心变量：
+在根目录创建 `.env` 文件（已在 `.gitignore` 中），或在 GitHub 仓库 Settings → Secrets and variables → Actions 中配置：
+
+| 变量名 | 必填 | 说明 |
+|--------|------|------|
+| `FMP_API_KEY` | ✓ | Financial Modeling Prep API 密钥 |
+| `ANTHROPIC_API_KEY` | ✓ | Anthropic API 密钥（Agent 调用） |
+| `R2_ENDPOINT_URL` | ✓ | Cloudflare R2 端点，格式：`https://<ACCOUNT_ID>.r2.cloudflarestorage.com` |
+| `R2_ACCESS_KEY_ID` | ✓ | R2 Access Key ID |
+| `R2_SECRET_ACCESS_KEY` | ✓ | R2 Secret Access Key |
+| `R2_BUCKET_NAME` | 可选 | R2 桶名，默认 `novasignal` |
+
+本地 `.env` 文件示例：
 
 ```env
 FMP_API_KEY=your_fmp_api_key
 ANTHROPIC_API_KEY=your_anthropic_api_key
-CF_R2_ACCESS_KEY_ID=your_r2_access_key
-CF_R2_SECRET_ACCESS_KEY=your_r2_secret_key
-CF_R2_ENDPOINT_URL=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-
+R2_ENDPOINT_URL=https://xxxxxxxxxxxx.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=your_r2_access_key
+R2_SECRET_ACCESS_KEY=your_r2_secret_key
+R2_BUCKET_NAME=novasignal
 ```
+
+> **注意：** `config/settings.yaml` 中存放非敏感的默认参数（超时、重试策略、阈值等），无需修改即可使用。
 
 ### 3. 本地测试运行
 
-你可以手动触发一次发现与分析流程：
-
 ```bash
-# 测试 FMP 数据抓取与沙盒初始化
-python src/orchestrator/run_pipeline.py --mode dev
+# 运行单元测试（不需要任何 API 密钥）
+python -m pytest tests/ -v
 
+# 仅测试 FMP 数据发现（需要 FMP_API_KEY）
+python -m src.orchestrator.run_pipeline --mode discovery-only
+
+# 开发模式：跳过 R2 上传，结果打印到 stdout
+python -m src.orchestrator.run_pipeline --mode dev --symbols AAPL TSLA
+
+# 生产模式：全流程（需要全部环境变量）
+python -m src.orchestrator.run_pipeline --mode production
 ```
 
 ## ⚠️ 免责声明
