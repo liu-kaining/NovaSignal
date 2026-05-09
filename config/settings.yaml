@@ -21,6 +21,8 @@ r2:
     max_wait_seconds: 8
 
 pipeline:
+  model: ""          # empty = CLI default (claude-sonnet-4-6)
+  base_url: ""       # empty = official Anthropic API
   sandbox_timeout_seconds: 300
   concurrency: 4
   modes:

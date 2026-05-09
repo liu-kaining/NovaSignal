@@ -35,6 +35,8 @@ def run_pipeline(
     sandbox_timeout: float = 300,
     prompt_path: str | Path = "prompts/ipo_v1_template.md",
     skip_upload: bool = False,
+    model: str | None = None,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     """Execute the NovaSignal analysis pipeline.
 
@@ -86,6 +88,8 @@ def run_pipeline(
             r2=r2,
             concurrency=concurrency,
             timeout=sandbox_timeout,
+            model=model,
+            base_url=base_url,
         )
     )
 
@@ -117,6 +121,8 @@ async def _run_all_agents(
     r2: R2Client | None,
     concurrency: int,
     timeout: float,
+    model: str | None = None,
+    base_url: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run agent invocations with bounded concurrency."""
     semaphore = asyncio.Semaphore(concurrency)
@@ -129,6 +135,8 @@ async def _run_all_agents(
             r2=r2,
             timeout=timeout,
             semaphore=semaphore,
+            model=model,
+            base_url=base_url,
         )
         for entry in discovery_entries
     ]
@@ -144,6 +152,8 @@ async def _run_single_agent(
     r2: R2Client | None,
     timeout: float,
     semaphore: asyncio.Semaphore,
+    model: str | None = None,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     """Execute a single agent run within a sandbox."""
     symbol = entry["symbol"]
@@ -158,11 +168,19 @@ async def _run_single_agent(
                 "Follow the instructions in prompt.md to analyze the data in raw_data.json. "
                 "Produce the output files as specified."
             )
+            env_vars: dict[str, str] = {
+                "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", ""),
+            }
+            effective_base_url = base_url or os.getenv("ANTHROPIC_BASE_URL")
+            if effective_base_url:
+                env_vars["ANTHROPIC_BASE_URL"] = effective_base_url
+
             result = await invoke_agent(
                 agent_instruction,
                 working_dir=context.sandbox_dir,
                 timeout_seconds=timeout,
-                env_vars={"ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", "")},
+                env_vars=env_vars,
+                model=model,
             )
 
             outputs = sandbox_mgr.extract_results(context)
@@ -343,6 +361,16 @@ def main() -> None:
         default="prompts/ipo_v1_template.md",
         help="Path to prompt template",
     )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Claude model to use (default: CLI default, e.g. claude-sonnet-4-6)",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Anthropic API base URL (default: official API)",
+    )
 
     args = parser.parse_args()
     configure_logging()
@@ -355,6 +383,8 @@ def main() -> None:
             concurrency=args.concurrency,
             sandbox_timeout=args.timeout,
             prompt_path=args.prompt,
+            model=args.model,
+            base_url=args.base_url,
         )
         if summary["results"]:
             failed = summary.get("failure_count", 0)

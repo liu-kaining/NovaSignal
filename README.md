@@ -52,6 +52,8 @@ npm install -g @anthropic-ai/claude-code
 |--------|------|------|
 | `FMP_API_KEY` | ✓ | Financial Modeling Prep API 密钥 |
 | `ANTHROPIC_API_KEY` | ✓ | Anthropic API 密钥（Agent 调用） |
+| `ANTHROPIC_BASE_URL` | 可选 | 自定义 Anthropic API 端点（代理/区域端点），留空使用官方 API |
+| `ANTHROPIC_MODEL` | 可选 | 指定 Claude 模型（如 `claude-sonnet-4-6`），留空使用 CLI 默认值 |
 | `R2_ENDPOINT_URL` | ✓ | Cloudflare R2 端点，格式：`https://<ACCOUNT_ID>.r2.cloudflarestorage.com` |
 | `R2_ACCESS_KEY_ID` | ✓ | R2 Access Key ID |
 | `R2_SECRET_ACCESS_KEY` | ✓ | R2 Secret Access Key |

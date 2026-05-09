@@ -39,6 +39,7 @@ async def invoke_agent(
     timeout_seconds: float = 300,
     agent_command: str = "claude --print --dangerously-skip-permissions",
     env_vars: dict[str, str] | None = None,
+    model: str | None = None,
     retry_attempts: int = 3,
     retry_min_wait_seconds: float = 5,
     retry_max_wait_seconds: float = 30,
@@ -49,7 +50,10 @@ async def invoke_agent(
     prompt via -p flag. Retries on transient failures (non-zero exit codes
     that are not permission/auth errors).
     """
-    cmd_parts = agent_command.split() + ["-p", prompt]
+    cmd_parts = agent_command.split()
+    if model:
+        cmd_parts += ["--model", model]
+    cmd_parts += ["-p", prompt]
     env = _build_env(env_vars)
     work_dir = str(working_dir)
 
