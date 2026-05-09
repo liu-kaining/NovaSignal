@@ -20,7 +20,7 @@ class FMPAPIError(RuntimeError):
 class FMPClient:
     """Small, retry-aware client for Financial Modeling Prep data."""
 
-    DEFAULT_BASE_URL = "https://financialmodelingprep.com/api/v3"
+    DEFAULT_BASE_URL = "https://financialmodelingprep.com/stable"
 
     def __init__(
         self,
@@ -67,7 +67,7 @@ class FMPClient:
             params["from"],
             params["to"],
         )
-        data = self._get("/ipo_calendar", params=params)
+        data = self._get("/ipos-calendar", params=params)
         if not isinstance(data, list):
             raise FMPAPIError(
                 f"Expected IPO calendar response to be a list, got {type(data).__name__}"
@@ -75,6 +75,15 @@ class FMPClient:
 
         LOGGER.info("Fetched %s IPO calendar entries", len(data))
         return data
+
+    def get_fundraising(self, cik: str) -> Any:
+        """Fetch fundraising activity for a company by SEC Central Index Key (CIK)."""
+        trimmed = cik.strip()
+        if not trimmed:
+            raise ValueError("cik must be a non-empty string")
+
+        LOGGER.info("Fetching FMP fundraising data for CIK %s", trimmed)
+        return self._get("/fundraising", params={"cik": trimmed})
 
     def _get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         request_params = dict(params or {})

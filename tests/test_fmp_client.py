@@ -64,7 +64,7 @@ class FMPClientTest(unittest.TestCase):
         )
         client = FMPClient(
             api_key="test-key",
-            base_url="https://example.test/api/v3/",
+            base_url="https://example.test/stable/",
             timeout_seconds=5,
             session=session,
         )
@@ -79,7 +79,7 @@ class FMPClientTest(unittest.TestCase):
         self.assertEqual(
             session.calls[0],
             {
-                "url": "https://example.test/api/v3/ipo_calendar",
+                "url": "https://example.test/stable/ipos-calendar",
                 "params": {
                     "from": "2026-05-09",
                     "to": "2026-05-10",
@@ -120,6 +120,25 @@ class FMPClientTest(unittest.TestCase):
 
         with self.assertRaises(FMPAPIError):
             client.get_ipo_calendar("2026-05-09", "2026-05-10")
+
+    def test_get_fundraising_uses_stable_path_and_cik(self):
+        session = FakeSession([FakeResponse([{"round": "series-a"}])])
+        client = FMPClient(
+            api_key="test-key",
+            base_url="https://example.test/stable",
+            session=session,
+        )
+
+        self.assertEqual(client.get_fundraising(" 0001547416 "), [{"round": "series-a"}])
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(
+            session.calls[0],
+            {
+                "url": "https://example.test/stable/fundraising",
+                "params": {"cik": "0001547416", "apikey": "test-key"},
+                "timeout": 30,
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ project:
   domain: novasignal.thetamind.ai
 
 fmp:
-  base_url: https://financialmodelingprep.com/api/v3
+  base_url: https://financialmodelingprep.com/stable
   timeout_seconds: 30
   retry:
     attempts: 3
