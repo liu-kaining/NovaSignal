@@ -9,9 +9,10 @@ from src.fetchers.fmp_client import FMPAPIError, FMPClient
 
 
 class FakeResponse:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, headers=None):
         self.payload = payload
         self.status_code = status_code
+        self.headers = headers or {}
 
     def json(self):
         return self.payload

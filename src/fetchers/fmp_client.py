@@ -8,7 +8,7 @@ from datetime import date, datetime
 from typing import Any
 
 import requests
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import Retrying, retry_if_exception, stop_after_attempt
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,9 +28,9 @@ class FMPClient:
         *,
         base_url: str = DEFAULT_BASE_URL,
         timeout_seconds: float = 30,
-        retry_attempts: int = 3,
-        retry_min_wait_seconds: float = 2,
-        retry_max_wait_seconds: float = 10,
+        retry_attempts: int = 6,
+        retry_min_wait_seconds: float = 5,
+        retry_max_wait_seconds: float = 120,
         session: requests.Session | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("FMP_API_KEY")
@@ -39,13 +39,12 @@ class FMPClient:
 
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self._retry_min_wait_seconds = retry_min_wait_seconds
+        self._retry_max_wait_seconds = retry_max_wait_seconds
         self.session = session or requests.Session()
         self._retryer = Retrying(
             stop=stop_after_attempt(retry_attempts),
-            wait=wait_exponential(
-                min=retry_min_wait_seconds,
-                max=retry_max_wait_seconds,
-            ),
+            wait=self._wait_between_retries,
             retry=retry_if_exception(_is_retryable_exception),
             reraise=True,
             before_sleep=_log_retry,
@@ -149,6 +148,34 @@ class FMPClient:
                 return _parse_json(response)
 
         raise FMPAPIError("FMP request failed without returning a response")
+
+    def _wait_between_retries(self, retry_state: Any) -> float:
+        """Honor Retry-After when present; otherwise exponential backoff in seconds."""
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        if isinstance(exc, requests.HTTPError) and exc.response is not None:
+            ra = exc.response.headers.get("Retry-After")
+            if ra is not None:
+                try:
+                    wait_s = float(ra)
+                    LOGGER.info("Sleeping %.1fs per FMP Retry-After header", wait_s)
+                    return wait_s
+                except ValueError:
+                    pass
+
+        if (
+            self._retry_min_wait_seconds == 0
+            and self._retry_max_wait_seconds == 0
+        ):
+            return 0.0
+
+        n = retry_state.attempt_number
+        wait = self._retry_min_wait_seconds * (2 ** (n - 1))
+        return float(
+            min(
+                max(wait, self._retry_min_wait_seconds),
+                self._retry_max_wait_seconds,
+            )
+        )
 
 
 def configure_logging(level: int = logging.INFO) -> None:

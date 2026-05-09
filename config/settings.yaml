@@ -6,9 +6,9 @@ fmp:
   base_url: https://financialmodelingprep.com/stable
   timeout_seconds: 30
   retry:
-    attempts: 3
-    min_wait_seconds: 2
-    max_wait_seconds: 10
+    attempts: 6
+    min_wait_seconds: 5
+    max_wait_seconds: 120
 
 r2:
   endpoint_url: ${R2_ENDPOINT_URL}

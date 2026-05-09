@@ -15,7 +15,7 @@ class ConfigLoaderTest(unittest.TestCase):
         fmp = get_fmp_settings()
         self.assertEqual(fmp["timeout_seconds"], 30)
         self.assertIn("retry", fmp)
-        self.assertEqual(fmp["retry"]["attempts"], 3)
+        self.assertEqual(fmp["retry"]["attempts"], 6)
 
     def test_r2_settings(self):
         r2 = get_r2_settings()
