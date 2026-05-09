@@ -1,0 +1,96 @@
+name: Evolution Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Metrics date to evaluate (YYYY-MM-DD, default: 30 days ago)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (check without applying corrections)"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "0 6 * * 0"
+
+jobs:
+  evolution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine evaluation date
+        id: date
+        run: |
+          if [ -n "${{ inputs.date }}" ]; then
+            echo "eval_date=${{ inputs.date }}" >> $GITHUB_OUTPUT
+          else
+            echo "eval_date=$(date -d '30 days ago' +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run deviation calculator
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          python -m src.evolution.deviation \
+            --symbols $(python -c "
+          import json, sys
+          from src.storage.r2_client import R2Client
+          r2 = R2Client()
+          keys = r2.list_objects('metrics/${{ steps.date.outputs.eval_date }}/')
+          symbols = [k.split('/')[-1].replace('_metrics.json', '') for k in keys if k.endswith('.json')]
+          print(' '.join(symbols))
+          ") \
+            --date ${{ steps.date.outputs.eval_date }} \
+            --save
+
+      - name: Run prompt corrector
+        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        env:
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          python -m src.evolution.corrector \
+            --prompt prompts/ipo_v1_template.md \
+            --min-samples 5
+
+      - name: Check for prompt changes
+        id: changes
+        run: |
+          if git diff --quiet prompts/; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit prompt corrections
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "NovaSignal Bot"
+          git config user.email "bot@novasignal.thetamind.ai"
+          git add prompts/
+          git commit -m "evolution: auto-correct prompt based on deviation analysis
+
+          Triggered by weekly evolution pipeline.
+          Date evaluated: ${{ steps.date.outputs.eval_date }}"
+          git push

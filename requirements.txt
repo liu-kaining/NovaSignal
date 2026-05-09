@@ -3,3 +3,5 @@ aiohttp
 boto3
 tenacity
 pyyaml
+pytest
+pytest-asyncio

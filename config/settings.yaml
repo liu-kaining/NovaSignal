@@ -10,5 +10,27 @@ fmp:
     min_wait_seconds: 2
     max_wait_seconds: 10
 
+r2:
+  endpoint_url: ${R2_ENDPOINT_URL}
+  access_key_id: ${R2_ACCESS_KEY_ID}
+  secret_access_key: ${R2_SECRET_ACCESS_KEY}
+  bucket_name: novasignal
+  retry:
+    attempts: 3
+    min_wait_seconds: 1
+    max_wait_seconds: 8
+
 pipeline:
   sandbox_timeout_seconds: 300
+  concurrency: 4
+  modes:
+    - discovery-only
+    - production
+    - dev
+  agent_command: "claude --print --dangerously-skip-permissions"
+
+evolution:
+  deviation_threshold: 0.15
+  min_samples_for_correction: 5
+  lookback_days: 30
+  auto_correct: true

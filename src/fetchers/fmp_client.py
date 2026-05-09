@@ -85,6 +85,53 @@ class FMPClient:
         LOGGER.info("Fetching FMP fundraising data for CIK %s", trimmed)
         return self._get("/fundraising", params={"cik": trimmed})
 
+    def get_stock_price(self, symbol: str) -> dict[str, Any]:
+        """Fetch the current stock price quote for a symbol."""
+        trimmed = symbol.strip().upper()
+        if not trimmed:
+            raise ValueError("symbol must be a non-empty string")
+
+        LOGGER.info("Fetching stock price for %s", trimmed)
+        data = self._get("/profile", params={"symbol": trimmed})
+        if isinstance(data, list):
+            if not data:
+                raise FMPAPIError(f"No price data found for symbol {trimmed}")
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        raise FMPAPIError(
+            f"Unexpected response type for stock price: {type(data).__name__}"
+        )
+
+    def get_stock_price_historical(
+        self,
+        symbol: str,
+        from_date: str | date | datetime,
+        to_date: str | date | datetime,
+    ) -> list[dict[str, Any]]:
+        """Fetch historical daily price data for a symbol within a date range."""
+        trimmed = symbol.strip().upper()
+        if not trimmed:
+            raise ValueError("symbol must be a non-empty string")
+
+        params = {
+            "symbol": trimmed,
+            "from": _format_date(from_date),
+            "to": _format_date(to_date),
+        }
+        LOGGER.info(
+            "Fetching historical prices for %s from %s to %s",
+            trimmed,
+            params["from"],
+            params["to"],
+        )
+        data = self._get("/historical-price-eod/full", params=params)
+        if not isinstance(data, list):
+            raise FMPAPIError(
+                f"Expected historical price response to be a list, got {type(data).__name__}"
+            )
+        return data
+
     def _get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         request_params = dict(params or {})
         request_params["apikey"] = self.api_key

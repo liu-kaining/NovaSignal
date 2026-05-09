@@ -1,0 +1,276 @@
+"""Main pipeline orchestration entry point."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import os
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+from typing import Any
+
+from src.fetchers.fmp_client import FMPClient, configure_logging
+from src.orchestrator.async_runner import AgentRunError, invoke_agent
+from src.orchestrator.sandbox_manager import SandboxError, SandboxManager
+from src.storage.r2_client import R2Client, R2StorageError
+
+LOGGER = logging.getLogger(__name__)
+
+PIPELINE_MODES = ("discovery-only", "production", "dev")
+
+
+class PipelineError(RuntimeError):
+    """Raised when the pipeline encounters a fatal error."""
+
+
+def run_pipeline(
+    mode: str = "production",
+    *,
+    symbols: list[str] | None = None,
+    lookback_days: int = 7,
+    concurrency: int = 4,
+    sandbox_timeout: float = 300,
+    prompt_path: str | Path = "prompts/ipo_v1_template.md",
+    skip_upload: bool = False,
+) -> dict[str, Any]:
+    """Execute the NovaSignal analysis pipeline.
+
+    Modes:
+        discovery-only: Fetch IPO calendar and output discovered symbols.
+        production: Full pipeline (discover -> sandbox -> agent -> upload).
+        dev: Like production but skips R2 upload and prints results.
+    """
+    if mode not in PIPELINE_MODES:
+        raise PipelineError(f"Invalid mode: {mode}. Must be one of {PIPELINE_MODES}")
+
+    LOGGER.info("Starting pipeline in '%s' mode", mode)
+
+    # Phase 1: Discovery
+    fmp = _create_fmp_client()
+    discovered = _discover_symbols(fmp, lookback_days, symbols)
+
+    if mode == "discovery-only":
+        LOGGER.info("Discovery-only mode: found %d symbols", len(discovered))
+        return {"mode": mode, "symbols": discovered, "results": []}
+
+    # Phase 2: Load prompt template
+    prompt_content = _load_prompt(prompt_path)
+
+    # Phase 3: Execute agent for each symbol
+    should_upload = mode == "production" and not skip_upload
+    r2 = _create_r2_client() if should_upload else None
+    sandbox_mgr = SandboxManager()
+
+    results = asyncio.run(
+        _run_all_agents(
+            symbols=discovered,
+            prompt_content=prompt_content,
+            sandbox_mgr=sandbox_mgr,
+            r2=r2,
+            concurrency=concurrency,
+            timeout=sandbox_timeout,
+        )
+    )
+
+    summary = {
+        "mode": mode,
+        "symbols": discovered,
+        "results": results,
+        "success_count": sum(1 for r in results if r.get("success")),
+        "failure_count": sum(1 for r in results if not r.get("success")),
+    }
+
+    if mode == "dev":
+        _print_dev_results(results)
+
+    LOGGER.info(
+        "Pipeline complete: %d/%d succeeded",
+        summary["success_count"],
+        len(results),
+    )
+    return summary
+
+
+async def _run_all_agents(
+    *,
+    symbols: list[str],
+    prompt_content: str,
+    sandbox_mgr: SandboxManager,
+    r2: R2Client | None,
+    concurrency: int,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    """Run agent invocations with bounded concurrency."""
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks = [
+        _run_single_agent(
+            symbol=sym,
+            prompt_content=prompt_content,
+            sandbox_mgr=sandbox_mgr,
+            r2=r2,
+            timeout=timeout,
+            semaphore=semaphore,
+        )
+        for sym in symbols
+    ]
+    return await asyncio.gather(*tasks)
+
+
+async def _run_single_agent(
+    *,
+    symbol: str,
+    prompt_content: str,
+    sandbox_mgr: SandboxManager,
+    r2: R2Client | None,
+    timeout: float,
+    semaphore: asyncio.Semaphore,
+) -> dict[str, Any]:
+    """Execute a single agent run within a sandbox."""
+    async with semaphore:
+        context = None
+        try:
+            raw_data = {"symbol": symbol, "timestamp": date.today().isoformat()}
+            context = sandbox_mgr.create(symbol, raw_data, prompt_content)
+
+            result = await invoke_agent(
+                prompt_content,
+                working_dir=context.sandbox_dir,
+                timeout_seconds=timeout,
+                env_vars={"ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", "")},
+            )
+
+            outputs = sandbox_mgr.extract_results(context)
+
+            if r2 and outputs.get("report"):
+                r2.upload_report(symbol, outputs["report"])
+            if r2 and outputs.get("metrics"):
+                r2.upload_metrics(symbol, outputs["metrics"])
+
+            return {
+                "symbol": symbol,
+                "success": True,
+                "report": outputs.get("report"),
+                "metrics": outputs.get("metrics"),
+            }
+
+        except (AgentRunError, SandboxError) as exc:
+            LOGGER.error("Agent run failed for %s: %s", symbol, exc)
+            return {"symbol": symbol, "success": False, "error": str(exc)}
+        except R2StorageError as exc:
+            LOGGER.error("Upload failed for %s: %s", symbol, exc)
+            return {"symbol": symbol, "success": False, "error": f"Upload: {exc}"}
+        finally:
+            if context:
+                sandbox_mgr.cleanup(context)
+
+
+def _discover_symbols(
+    fmp: FMPClient, lookback_days: int, override: list[str] | None
+) -> list[str]:
+    """Discover symbols from FMP IPO calendar or use override list."""
+    if override:
+        return [s.upper() for s in override]
+
+    today = date.today()
+    from_date = today - timedelta(days=lookback_days)
+    entries = fmp.get_ipo_calendar(from_date, today)
+    symbols = [e["symbol"] for e in entries if e.get("symbol")]
+    LOGGER.info("Discovered %d symbols from IPO calendar", len(symbols))
+    return symbols
+
+
+def _load_prompt(path: str | Path) -> str:
+    """Load prompt template from file."""
+    prompt_file = Path(path)
+    if not prompt_file.exists():
+        raise PipelineError(f"Prompt template not found: {path}")
+    return prompt_file.read_text(encoding="utf-8")
+
+
+def _create_fmp_client() -> FMPClient:
+    """Create FMP client from environment."""
+    return FMPClient()
+
+
+def _create_r2_client() -> R2Client:
+    """Create R2 client from environment."""
+    return R2Client()
+
+
+def _print_dev_results(results: list[dict[str, Any]]) -> None:
+    """Print results to stdout in dev mode."""
+    for r in results:
+        print(f"\n{'='*60}")
+        print(f"Symbol: {r['symbol']} | Success: {r.get('success')}")
+        if r.get("error"):
+            print(f"Error: {r['error']}")
+        if r.get("report"):
+            print(f"Report preview: {r['report'][:200]}...")
+        print(f"{'='*60}")
+
+
+def main() -> None:
+    """CLI entry point for run_pipeline."""
+    parser = argparse.ArgumentParser(description="NovaSignal Analysis Pipeline")
+    parser.add_argument(
+        "--mode",
+        choices=PIPELINE_MODES,
+        default="production",
+        help="Pipeline execution mode",
+    )
+    parser.add_argument(
+        "--symbols",
+        nargs="*",
+        help="Override symbols to analyze (space-separated)",
+    )
+    parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=7,
+        help="Days to look back for IPO discovery",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=4,
+        help="Max concurrent agent invocations",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=300,
+        help="Sandbox timeout in seconds",
+    )
+    parser.add_argument(
+        "--prompt",
+        default="prompts/ipo_v1_template.md",
+        help="Path to prompt template",
+    )
+
+    args = parser.parse_args()
+    configure_logging()
+
+    try:
+        summary = run_pipeline(
+            mode=args.mode,
+            symbols=args.symbols,
+            lookback_days=args.lookback_days,
+            concurrency=args.concurrency,
+            sandbox_timeout=args.timeout,
+            prompt_path=args.prompt,
+        )
+        if summary["results"]:
+            failed = summary.get("failure_count", 0)
+            if failed > 0:
+                LOGGER.warning("%d symbols failed", failed)
+                sys.exit(1)
+    except PipelineError as exc:
+        LOGGER.error("Pipeline error: %s", exc)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

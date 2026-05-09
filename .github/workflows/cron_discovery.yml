@@ -1,12 +1,12 @@
-name: Discovery Smoke Check
+name: Discovery Pipeline
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 */6 * * *"
 
 jobs:
-  smoke:
+  discover:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,3 +22,22 @@ jobs:
 
       - name: Compile source
         run: python -m compileall src
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -v
+
+      - name: Run discovery pipeline
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          python -m src.orchestrator.run_pipeline \
+            --mode discovery-only \
+            --lookback-days 7
+
+      - name: Upload discovery results
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-${{ github.run_id }}
+          path: discovery_output.json
+          retention-days: 7
+        if: always()
