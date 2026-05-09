@@ -1,0 +1,1 @@
+"""NovaSignal core Python package."""

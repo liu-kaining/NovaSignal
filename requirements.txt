@@ -1,0 +1,5 @@
+requests
+aiohttp
+boto3
+tenacity
+pyyaml

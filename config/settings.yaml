@@ -1,0 +1,14 @@
+project:
+  name: NovaSignal
+  domain: novasignal.thetamind.ai
+
+fmp:
+  base_url: https://financialmodelingprep.com/api/v3
+  timeout_seconds: 30
+  retry:
+    attempts: 3
+    min_wait_seconds: 2
+    max_wait_seconds: 10
+
+pipeline:
+  sandbox_timeout_seconds: 300
