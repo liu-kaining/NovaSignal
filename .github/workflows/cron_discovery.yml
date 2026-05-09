@@ -1,4 +1,7 @@
 name: Discovery Pipeline
+# NOTE: This workflow runs discovery for monitoring/notification only.
+# The main analysis pipeline (cron_agent_runner.yml) performs its own discovery
+# with idempotency checks against R2 to avoid duplicate processing.
 
 on:
   workflow_dispatch:

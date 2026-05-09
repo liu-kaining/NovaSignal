@@ -140,6 +140,31 @@ class FMPClientTest(unittest.TestCase):
             },
         )
 
+    def test_get_stock_price_historical_uses_correct_endpoint(self):
+        """Verify the correct FMP v3 API endpoint for historical prices."""
+        session = FakeSession([FakeResponse([
+            {"date": "2026-01-15", "close": 100.0, "adjClose": 99.5}
+        ])])
+        client = FMPClient(
+            api_key="test-key",
+            base_url="https://example.test/stable",
+            session=session,
+        )
+
+        result = client.get_stock_price_historical("AAPL", "2026-01-15", "2026-01-15")
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["close"], 100.0)
+        self.assertEqual(len(session.calls), 1)
+        # Verify the endpoint path includes the symbol
+        call = session.calls[0]
+        self.assertEqual(
+            call["url"],
+            "https://example.test/stable/historical-price-full/AAPL"
+        )
+        self.assertEqual(call["params"]["from"], "2026-01-15")
+        self.assertEqual(call["params"]["to"], "2026-01-15")
+
 
 if __name__ == "__main__":
     unittest.main()

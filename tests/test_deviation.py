@@ -28,7 +28,7 @@ class DeviationCalculatorTest(unittest.TestCase):
         self.assertEqual(result["predicted_price"], 100.0)
         self.assertEqual(result["actual_price"], 95.0)
         # Verify T+30 date was used for price fetch
-        fmp.get_stock_price_historical.assert_called_with("AAPL", "2026-02-14", "2026-02-14")
+        fmp.get_stock_price_historical.assert_called_with("AAPL", "2026-02-14", "2026-02-19")
 
     def test_evaluate_exceeds_threshold(self):
         calc, fmp, r2 = self._make_calculator(threshold=0.05)

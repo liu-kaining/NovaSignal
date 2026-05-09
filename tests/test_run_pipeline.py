@@ -34,6 +34,32 @@ class DiscoverSymbolsTest(unittest.TestCase):
         fmp.get_ipo_calendar.assert_called_once()
 
 
+class FilterAlreadyProcessedTest(unittest.TestCase):
+    def test_filters_existing_symbols(self):
+        from src.orchestrator.run_pipeline import _filter_already_processed
+        r2 = MagicMock()
+        r2.list_objects.return_value = [
+            "reports/2026-01-01/AAPL_report.md",
+            "reports/2026-01-01/TSLA_report.md",
+        ]
+        discovered = [
+            {"symbol": "AAPL"},
+            {"symbol": "GOOG"},
+            {"symbol": "TSLA"},
+        ]
+        result = _filter_already_processed(r2, discovered)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["symbol"], "GOOG")
+
+    def test_empty_r2_returns_all(self):
+        from src.orchestrator.run_pipeline import _filter_already_processed
+        r2 = MagicMock()
+        r2.list_objects.return_value = []
+        discovered = [{"symbol": "AAPL"}, {"symbol": "GOOG"}]
+        result = _filter_already_processed(r2, discovered)
+        self.assertEqual(len(result), 2)
+
+
 class BuildRawDataTest(unittest.TestCase):
     def test_builds_data_with_cik(self):
         fmp = MagicMock()

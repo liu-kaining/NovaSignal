@@ -124,16 +124,25 @@ class DeviationCalculator:
             raise DeviationError(f"Invalid metrics JSON for {symbol}: {exc}") from exc
 
     def _fetch_actual_price(self, symbol: str, target_date: str) -> float:
-        """Fetch the actual closing price for a symbol on a date."""
+        """Fetch the actual closing price for a symbol near the target date.
+
+        Searches within a 5-day window after target_date to handle weekends
+        and holidays. Returns the first available trading day's close price.
+        """
         try:
+            start_d = date.fromisoformat(target_date)
+            end_d = start_d + timedelta(days=5)
             data = self._fmp.get_stock_price_historical(
-                symbol, target_date, target_date
+                symbol, start_d.isoformat(), end_d.isoformat()
             )
             if not data:
                 raise DeviationError(
-                    f"No historical price data for {symbol} on {target_date}"
+                    f"No historical price data for {symbol} between {target_date} and {end_d}"
                 )
-            price = data[0].get("close") or data[0].get("adjClose")
+            # FMP returns data sorted by date (descending or ascending)
+            # Take the first record which is closest to target_date
+            first_record = data[0]
+            price = first_record.get("close") or first_record.get("adjClose")
             if price is None:
                 raise DeviationError(
                     f"No close price in data for {symbol} on {target_date}"

@@ -15,6 +15,9 @@ on:
   schedule:
     - cron: "0 6 * * 0"
 
+permissions:
+  contents: write  # Required for auto-committing prompt corrections
+
 jobs:
   evolution:
     runs-on: ubuntu-latest

@@ -125,7 +125,7 @@ class FMPClient:
             params["from"],
             params["to"],
         )
-        data = self._get("/historical-price-eod/full", params=params)
+        data = self._get(f"/historical-price-full/{trimmed}", params=params)
         if not isinstance(data, list):
             raise FMPAPIError(
                 f"Expected historical price response to be a list, got {type(data).__name__}"

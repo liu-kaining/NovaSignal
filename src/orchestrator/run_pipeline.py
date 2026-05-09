@@ -51,6 +51,17 @@ def run_pipeline(
     # Phase 1: Discovery
     fmp = _create_fmp_client()
     discovered = _discover_symbols(fmp, lookback_days, symbols)
+
+    # Production mode: deduplicate against existing R2 reports (idempotency)
+    # to prevent re-analyzing and burning tokens on already processed symbols
+    should_upload = mode == "production"
+    if should_upload and symbols is None:
+        try:
+            r2_check = _create_r2_client()
+            discovered = _filter_already_processed(r2_check, discovered)
+        except Exception as exc:
+            LOGGER.warning("Failed to check existing reports for deduplication: %s", exc)
+
     symbol_names = [e["symbol"] for e in discovered]
 
     if mode == "discovery-only":
@@ -258,6 +269,29 @@ def _create_fmp_client() -> FMPClient:
 def _create_r2_client() -> R2Client:
     """Create R2 client from environment."""
     return R2Client()
+
+
+def _filter_already_processed(
+    r2: R2Client, discovered: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Filter out symbols that already have reports in R2 (idempotency).
+
+    Prevents burning tokens on re-analyzing the same stocks every day.
+    Returns only the entries that haven't been processed yet.
+    """
+    LOGGER.info("Checking R2 for already processed symbols...")
+    existing_keys = r2.list_objects("reports/")
+    # Extract symbol names from keys like "reports/2026-01-01/AAPL_report.md"
+    processed_symbols = {
+        k.split('/')[-1].replace('_report.md', '')
+        for k in existing_keys
+    }
+    LOGGER.debug("Found %d existing reports in R2", len(processed_symbols))
+
+    filtered = [e for e in discovered if e["symbol"] not in processed_symbols]
+    LOGGER.info("Deduplication: %d new symbols to process (filtered %d already done)",
+                len(filtered), len(discovered) - len(filtered))
+    return filtered
 
 
 def _print_dev_results(results: list[dict[str, Any]]) -> None:
