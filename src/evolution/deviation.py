@@ -139,10 +139,20 @@ class DeviationCalculator:
                 raise DeviationError(
                     f"No historical price data for {symbol} between {target_date} and {end_d}"
                 )
-            # FMP returns data sorted by date (descending or ascending)
-            # Take the first record which is closest to target_date
-            first_record = data[0]
-            price = first_record.get("close") or first_record.get("adjClose")
+
+            def _row_date(row: dict[str, Any]) -> str:
+                return str(row.get("date") or "")
+
+            ordered = sorted(data, key=_row_date)
+            chosen: dict[str, Any] | None = None
+            for row in ordered:
+                if _row_date(row) >= target_date:
+                    chosen = row
+                    break
+            if chosen is None:
+                chosen = ordered[-1]
+
+            price = chosen.get("close") or chosen.get("adjClose")
             if price is None:
                 raise DeviationError(
                     f"No close price in data for {symbol} on {target_date}"
@@ -174,7 +184,10 @@ def main() -> None:
     args = parser.parse_args()
     configure_logging()
 
-    fmp = FMPClient()
+    try:
+        fmp = FMPClient.from_config()
+    except Exception:
+        fmp = FMPClient()
     r2 = R2Client()
     calculator = DeviationCalculator(fmp, r2, threshold=args.threshold)
 

@@ -280,8 +280,12 @@ def _load_prompt(path: str | Path) -> str:
 
 
 def _create_fmp_client() -> FMPClient:
-    """Create FMP client from environment."""
-    return FMPClient()
+    """Create FMP client from config/settings.yaml (API key still from env)."""
+    try:
+        return FMPClient.from_config()
+    except Exception as exc:
+        LOGGER.warning("FMP from_config failed (%s); using constructor defaults", exc)
+        return FMPClient()
 
 
 def _create_r2_client() -> R2Client:
@@ -324,8 +328,25 @@ def _print_dev_results(results: list[dict[str, Any]]) -> None:
         print(f"{'='*60}")
 
 
+def _first_nonempty(*values: object) -> str | None:
+    for v in values:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return None
+
+
 def main() -> None:
     """CLI entry point for run_pipeline."""
+    try:
+        from config.loader import get_pipeline_settings
+
+        pipe = get_pipeline_settings()
+    except Exception:
+        pipe = {}
+
     parser = argparse.ArgumentParser(description="NovaSignal Analysis Pipeline")
     parser.add_argument(
         "--mode",
@@ -347,13 +368,13 @@ def main() -> None:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=4,
+        default=int(pipe.get("concurrency", 4)),
         help="Max concurrent agent invocations",
     )
     parser.add_argument(
         "--timeout",
         type=float,
-        default=300,
+        default=float(pipe.get("sandbox_timeout_seconds", 300)),
         help="Sandbox timeout in seconds",
     )
     parser.add_argument(
@@ -375,6 +396,11 @@ def main() -> None:
     args = parser.parse_args()
     configure_logging()
 
+    model = _first_nonempty(args.model, os.getenv("ANTHROPIC_MODEL"), pipe.get("model"))
+    base_url = _first_nonempty(
+        args.base_url, os.getenv("ANTHROPIC_BASE_URL"), pipe.get("base_url")
+    )
+
     try:
         summary = run_pipeline(
             mode=args.mode,
@@ -383,8 +409,8 @@ def main() -> None:
             concurrency=args.concurrency,
             sandbox_timeout=args.timeout,
             prompt_path=args.prompt,
-            model=args.model,
-            base_url=args.base_url,
+            model=model,
+            base_url=base_url,
         )
         if summary["results"]:
             failed = summary.get("failure_count", 0)

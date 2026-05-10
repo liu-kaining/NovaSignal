@@ -53,20 +53,22 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          python -m src.evolution.deviation \
-            --symbols $(python -c "
-          import json, sys
+          EVAL="${{ steps.date.outputs.eval_date }}"
+          SYMS=$(python -c "
           from src.storage.r2_client import R2Client
           r2 = R2Client()
           keys = r2.list_objects('metrics/${{ steps.date.outputs.eval_date }}/')
           symbols = [k.split('/')[-1].replace('_metrics.json', '') for k in keys if k.endswith('.json')]
           print(' '.join(symbols))
-          ") \
-            --date ${{ steps.date.outputs.eval_date }} \
-            --save
+          ")
+          if [ -z "$SYMS" ]; then
+            echo "No metrics in R2 for ${EVAL}; skipping deviation."
+            exit 0
+          fi
+          python -m src.evolution.deviation --symbols $SYMS --date "$EVAL" --save
 
       - name: Run prompt corrector
-        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != true }}
         env:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

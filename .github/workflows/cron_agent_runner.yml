@@ -58,9 +58,13 @@ jobs:
           if [ -n "${{ inputs.symbols }}" ]; then
             SYMBOLS_ARG="--symbols ${{ inputs.symbols }}"
           fi
+          MODE="${{ inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            MODE=production
+          fi
 
           python -m src.orchestrator.run_pipeline \
-            --mode ${{ inputs.mode || 'production' }} \
+            --mode "$MODE" \
             --concurrency 4 \
             --timeout 300 \
             $SYMBOLS_ARG

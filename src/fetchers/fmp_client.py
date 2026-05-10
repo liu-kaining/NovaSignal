@@ -50,6 +50,22 @@ class FMPClient:
             before_sleep=_log_retry,
         )
 
+    @classmethod
+    def from_config(cls, session: requests.Session | None = None) -> FMPClient:
+        """Build a client using ``config/settings.yaml`` ``fmp`` section (API key still from env)."""
+        from config.loader import get_fmp_settings
+
+        fmp_cfg = get_fmp_settings()
+        retry = fmp_cfg.get("retry") or {}
+        return cls(
+            base_url=fmp_cfg.get("base_url") or cls.DEFAULT_BASE_URL,
+            timeout_seconds=float(fmp_cfg.get("timeout_seconds", 30)),
+            retry_attempts=int(retry.get("attempts", 6)),
+            retry_min_wait_seconds=float(retry.get("min_wait_seconds", 5)),
+            retry_max_wait_seconds=float(retry.get("max_wait_seconds", 120)),
+            session=session,
+        )
+
     def get_ipo_calendar(
         self,
         from_date: str | date | datetime,
@@ -124,12 +140,8 @@ class FMPClient:
             params["from"],
             params["to"],
         )
-        data = self._get(f"/historical-price-full/{trimmed}", params=params)
-        if not isinstance(data, list):
-            raise FMPAPIError(
-                f"Expected historical price response to be a list, got {type(data).__name__}"
-            )
-        return data
+        data = self._get("/historical-price-eod/full", params=params)
+        return _normalize_historical_rows(data)
 
     def _get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         request_params = dict(params or {})
@@ -176,6 +188,25 @@ class FMPClient:
                 self._retry_max_wait_seconds,
             )
         )
+
+
+def _normalize_historical_rows(payload: Any) -> list[dict[str, Any]]:
+    """Accept both a bare list and the stable API object with a ``historical`` array."""
+    if isinstance(payload, list):
+        rows = [x for x in payload if isinstance(x, dict)]
+        if len(rows) != len(payload):
+            raise FMPAPIError("Historical price list contained non-object entries")
+        return rows
+    if isinstance(payload, dict):
+        hist = payload.get("historical")
+        if isinstance(hist, list):
+            rows = [x for x in hist if isinstance(x, dict)]
+            if len(rows) != len(hist):
+                raise FMPAPIError("Historical price historical[] contained non-object entries")
+            return rows
+    raise FMPAPIError(
+        f"Unexpected historical price payload shape: {type(payload).__name__}"
+    )
 
 
 def configure_logging(level: int = logging.INFO) -> None:

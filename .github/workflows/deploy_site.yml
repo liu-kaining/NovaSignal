@@ -29,57 +29,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Sync reports from R2
+      - name: Sync reports from R2 and build index
         env:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-        run: |
-          python -c "
-          import json, os
-          from pathlib import Path
-          from src.storage.r2_client import R2Client
-
-          r2 = R2Client()
-          site_dir = Path('site/reports')
-          site_dir.mkdir(parents=True, exist_ok=True)
-
-          # Download recent reports
-          keys = r2.list_objects('reports/')
-          for key in keys[-50:]:  # Last 50 reports
-              content = r2.download_file(key)
-              # Convert key to local path
-              local_path = site_dir / key.replace('reports/', '')
-              local_path.parent.mkdir(parents=True, exist_ok=True)
-              local_path.write_bytes(content)
-              print(f'Synced: {key}')
-          "
-
-      - name: Build static site
-        run: |
-          mkdir -p site
-          # Generate index page
-          python -c "
-          from pathlib import Path
-          import json
-
-          site_dir = Path('site')
-          reports_dir = site_dir / 'reports'
-
-          reports = sorted(reports_dir.rglob('*.md'), reverse=True) if reports_dir.exists() else []
-
-          index = '# NovaSignal Reports\n\n'
-          index += f'Total reports: {len(reports)}\n\n'
-          for report in reports[:20]:
-              rel = report.relative_to(site_dir)
-              name = report.stem.replace('_report', '')
-              date_part = report.parent.name
-              index += f'- [{name} ({date_part})]({rel})\n'
-
-          (site_dir / 'index.md').write_text(index)
-          print(f'Built index with {len(reports)} reports')
-          "
+        run: python -m src.orchestrator.github_pages --site-dir site --limit 50 --max-links 20
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

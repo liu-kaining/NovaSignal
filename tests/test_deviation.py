@@ -30,6 +30,20 @@ class DeviationCalculatorTest(unittest.TestCase):
         # Verify T+30 date was used for price fetch
         fmp.get_stock_price_historical.assert_called_with("AAPL", "2026-02-14", "2026-02-19")
 
+    def test_evaluate_uses_first_row_on_or_after_target_date(self):
+        calc, fmp, r2 = self._make_calculator(threshold=0.5)
+
+        metrics = {"predicted_price": 100.0}
+        r2.download_file.return_value = json.dumps(metrics).encode()
+        fmp.get_stock_price_historical.return_value = [
+            {"date": "2026-02-13", "close": 1.0},
+            {"date": "2026-02-17", "close": 95.0},
+        ]
+
+        result = calc.evaluate("X", "2026-01-15")
+
+        self.assertEqual(result["actual_price"], 95.0)
+
     def test_evaluate_exceeds_threshold(self):
         calc, fmp, r2 = self._make_calculator(threshold=0.05)
 

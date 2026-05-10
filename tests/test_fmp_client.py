@@ -141,8 +141,7 @@ class FMPClientTest(unittest.TestCase):
             },
         )
 
-    def test_get_stock_price_historical_uses_correct_endpoint(self):
-        """Verify the correct FMP v3 API endpoint for historical prices."""
+    def test_get_stock_price_historical_uses_stable_eod_full_endpoint(self):
         session = FakeSession([FakeResponse([
             {"date": "2026-01-15", "close": 100.0, "adjClose": 99.5}
         ])])
@@ -157,14 +156,51 @@ class FMPClientTest(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["close"], 100.0)
         self.assertEqual(len(session.calls), 1)
-        # Verify the endpoint path includes the symbol
         call = session.calls[0]
         self.assertEqual(
             call["url"],
-            "https://example.test/stable/historical-price-full/AAPL"
+            "https://example.test/stable/historical-price-eod/full",
         )
+        self.assertEqual(call["params"]["symbol"], "AAPL")
         self.assertEqual(call["params"]["from"], "2026-01-15")
         self.assertEqual(call["params"]["to"], "2026-01-15")
+
+    def test_get_stock_price_historical_accepts_wrapped_payload(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "symbol": "AAPL",
+                        "historical": [
+                            {"date": "2026-01-15", "close": 42.0},
+                        ],
+                    }
+                )
+            ]
+        )
+        client = FMPClient(
+            api_key="test-key",
+            base_url="https://example.test/stable",
+            session=session,
+        )
+        rows = client.get_stock_price_historical("AAPL", "2026-01-15", "2026-01-15")
+        self.assertEqual(rows, [{"date": "2026-01-15", "close": 42.0}])
+
+    @patch("config.loader.get_fmp_settings")
+    def test_from_config_applies_yaml_retry_settings(self, mock_settings):
+        mock_settings.return_value = {
+            "base_url": "https://cfg.example/stable",
+            "timeout_seconds": 99,
+            "retry": {
+                "attempts": 2,
+                "min_wait_seconds": 1,
+                "max_wait_seconds": 3,
+            },
+        }
+        with patch.dict(os.environ, {"FMP_API_KEY": "k"}):
+            client = FMPClient.from_config()
+        self.assertEqual(client.base_url, "https://cfg.example/stable")
+        self.assertEqual(client.timeout_seconds, 99)
 
 
 if __name__ == "__main__":
