@@ -73,6 +73,20 @@ class R2ClientTest(unittest.TestCase):
         self.assertEqual(parsed["symbol"], "AAPL")
         self.assertEqual(parsed["deep"]["d"], "2026-01-01")
 
+    def test_upload_debug_artifact_key_structure(self):
+        client, mock_s3 = self._make_client()
+        key = client.upload_debug_artifact(
+            "PCLC",
+            "drafter/research_notes.md",
+            "# partial\n- https://www.sec.gov/example.htm\n",
+            report_date=date(2026, 5, 18),
+            content_type="text/markdown",
+        )
+        self.assertEqual(key, "debug/2026-05-18/PCLC/drafter/research_notes.md")
+        call_kwargs = mock_s3.put_object.call_args[1]
+        self.assertEqual(call_kwargs["ContentType"], "text/markdown")
+        self.assertIn(b"https://www.sec.gov/example.htm", call_kwargs["Body"])
+
     def test_upload_fmp_prefetch_bundle_key(self):
         client, mock_s3 = self._make_client()
         bundle = {"ipo_regulatory_lists": {"disclosures": []}, "global_market_context": {}}

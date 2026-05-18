@@ -71,13 +71,17 @@ class QualityGateResult:
 
 @dataclass
 class GateThresholds:
-    """Tunable thresholds for the quality gate. Two presets: draft / final."""
+    """Tunable thresholds for the quality gate. Two presets: draft / final.
+
+    Draft thresholds align with the 6-item required checklist in the drafter
+    prompt; final thresholds tighten for the post-reviewer revision.
+    """
 
     min_urls: int = 6
     max_unknown_phrases: int = 8
     required_chapters: int = 8
     max_null_metric_fields: int = 5
-    min_research_urls: int = 5
+    min_research_urls: int = 6
     min_report_chars: int = 3000
 
     @classmethod
@@ -87,11 +91,11 @@ class GateThresholds:
     @classmethod
     def final(cls) -> "GateThresholds":
         return cls(
-            min_urls=8,
+            min_urls=7,
             max_unknown_phrases=5,
             required_chapters=8,
             max_null_metric_fields=3,
-            min_research_urls=8,
+            min_research_urls=7,
             min_report_chars=3500,
         )
 

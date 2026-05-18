@@ -267,6 +267,67 @@ class ExecuteMultiStageTest(unittest.TestCase):
         stages = [o.stage for o in result.outcomes]
         self.assertNotIn("reviewer", stages)
 
+    def test_partial_artifacts_captured_on_failure(self):
+        """When drafter writes partial files before timing out, they should
+        be snapshotted into result.partial_artifacts BEFORE sandbox cleanup."""
+
+        async def fake_invoke_partial(prompt, *, working_dir, **kwargs):
+            wd = Path(working_dir)
+            # Simulate the agent making partial progress: writes
+            # research_notes.md + _progress.log, then "times out" (returns
+            # before writing report.md). The orchestrator will treat this
+            # as a failure but should preserve the partials.
+            (wd / "research_notes.md").write_text(
+                "# partial\n- https://www.sec.gov/example.htm\n", encoding="utf-8"
+            )
+            (wd / "_progress.log").write_text(
+                "[12:00:00] inventory_complete\n[12:03:00] web_research_done\n",
+                encoding="utf-8",
+            )
+            # NO report.md written → drafter considered failed
+            return None
+
+        sandbox_mgr = SandboxManager()
+        result = _run(
+            execute_multi_stage(
+                symbol="VIDA",
+                raw_data={"symbol": "VIDA"},
+                drafter_prompt="d",
+                reviewer_prompt="r",
+                reviser_prompt="v",
+                sandbox_mgr=sandbox_mgr,
+                stage_config=self._stage_config(),
+                invoker=fake_invoke_partial,
+            )
+        )
+        self.assertFalse(result.success)
+        # Partial files should be snapshotted before cleanup
+        self.assertIn("drafter/research_notes.md", result.partial_artifacts)
+        self.assertIn("drafter/_progress.log", result.partial_artifacts)
+        self.assertIn(
+            "https://www.sec.gov/example.htm",
+            result.partial_artifacts["drafter/research_notes.md"],
+        )
+
+    def test_no_partial_artifacts_on_success(self):
+        """On the happy path, partial_artifacts should remain empty (we only
+        snapshot on failure, otherwise the regular artifacts already cover us)."""
+        sandbox_mgr = SandboxManager()
+        result = _run(
+            execute_multi_stage(
+                symbol="VIDA",
+                raw_data={"symbol": "VIDA"},
+                drafter_prompt="d",
+                reviewer_prompt="r",
+                reviser_prompt="v",
+                sandbox_mgr=sandbox_mgr,
+                stage_config=self._stage_config(),
+                invoker=_make_drafter_fake(),
+            )
+        )
+        self.assertTrue(result.success, msg=result.error)
+        self.assertEqual(result.partial_artifacts, {})
+
     def test_url_verification_runs_when_enabled(self):
         sandbox_mgr = SandboxManager()
         cfg = StageConfig(

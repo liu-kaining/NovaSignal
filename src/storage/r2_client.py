@@ -178,6 +178,26 @@ class R2Client:
         self._put_object(key, content.encode("utf-8"), content_type="text/markdown")
         return key
 
+    def upload_debug_artifact(
+        self,
+        symbol: str,
+        relative_path: str,
+        content: str,
+        *,
+        report_date: str | date | datetime | None = None,
+        content_type: str = "text/plain",
+    ) -> str:
+        """Upload a partial-state file under ``debug/{date}/{SYMBOL}/{relative_path}``.
+
+        Used when a stage fails / times out so we can post-mortem what the
+        agent managed to write before being killed.
+        """
+        date_str = _resolve_date(report_date)
+        safe_rel = relative_path.lstrip("/")
+        key = f"debug/{date_str}/{symbol.upper()}/{safe_rel}"
+        self._put_object(key, content.encode("utf-8"), content_type=content_type)
+        return key
+
     def upload_quality_gate(
         self,
         symbol: str,

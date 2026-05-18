@@ -65,11 +65,15 @@ jobs:
             MODE=production
           fi
 
+          # Sequential (concurrency=1) keeps single-symbol budget large
+          # without blowing the 120-min job ceiling. 3 symbols × ~30 min worst
+          # case ≈ 90 min. Increase --max-symbols only when you've measured
+          # actual stage durations from R2 quality_gate/ outputs.
           python -m src.orchestrator.run_pipeline \
             --mode "$MODE" \
-            --concurrency 2 \
-            --timeout 480 \
-            --max-symbols 5 \
+            --concurrency 1 \
+            --timeout 900 \
+            --max-symbols 3 \
             $SYMBOLS_ARG
 
       - name: Upload run artifacts

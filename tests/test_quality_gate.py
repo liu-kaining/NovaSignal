@@ -232,7 +232,7 @@ class CheckOutputsTest(unittest.TestCase):
         self.assertTrue(any("critique.md" in f for f in result.failures))
 
     def test_final_threshold_stricter(self):
-        # GOOD_REPORT has 9 URLs; should pass draft (≥6) and final (≥8)
+        # GOOD_REPORT has 10 URLs; should pass draft (≥6) and final (≥7)
         sb = self._write_sandbox(
             report=GOOD_REPORT,
             metrics=GOOD_METRICS,

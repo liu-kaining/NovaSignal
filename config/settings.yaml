@@ -21,24 +21,26 @@ r2:
     max_wait_seconds: 8
 
 pipeline:
-  # Quality > quantity. Each symbol takes 6–10 min through the 3-stage flow.
-  # 3–5 high-quality reports per cron beats 20 mediocre ones.
+  # Quality > quantity. Each symbol can take 15–30 min through the full 3-stage
+  # flow (Drafter heaviest: 8+ web searches, optional Task subagents, ~3500 word
+  # bilingual report, self-check). 3 high-quality reports per cron beats 20 mediocre.
   model: ""          # empty = CLI default; opus-4-x strongly recommended for production quality
   base_url: ""       # empty = official Anthropic API
-  sandbox_timeout_seconds: 420   # per-stage default; overridden by stages.* below
-  concurrency: 2     # 3-stage flow is heavy; keep low to avoid Anthropic rate limits
-  max_symbols_per_run: 5
+  sandbox_timeout_seconds: 900   # per-stage default; overridden by stages.* below
+  concurrency: 1     # sequential by default — 3-stage flow is too heavy for parallelism
+  max_symbols_per_run: 3
   modes:
     - discovery-only
     - production
     - dev
   agent_command: "claude --print --dangerously-skip-permissions"
 
-  # Per-stage timeouts and retry budgets for the Drafter → Reviewer → Reviser flow
+  # Per-stage timeouts and retry budgets for the Drafter → Reviewer → Reviser flow.
+  # Budgets sized for opus-class models doing real Web research.
   stages:
-    drafter_timeout_seconds: 480     # Stage A: research + draft (the heaviest)
-    reviewer_timeout_seconds: 300    # Stage B: critique (lighter)
-    reviser_timeout_seconds: 360     # Stage C: surgical edits + final self-check
+    drafter_timeout_seconds: 900     # Stage A: 15 min ceiling (research + draft)
+    reviewer_timeout_seconds: 480    # Stage B: 8 min ceiling (critique)
+    reviser_timeout_seconds: 600     # Stage C: 10 min ceiling (surgical edits)
     drafter_max_attempts: 2          # 1 normal + up to 1 QA-feedback retry
     reviser_max_attempts: 2
     url_verify_sample: 5             # HEAD-check sample size from report URLs

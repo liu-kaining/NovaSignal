@@ -296,6 +296,33 @@ def _make_successful_stage_result(symbol: str) -> MultiStageResult:
     )
 
 
+def _make_failed_stage_result_with_partials(symbol: str) -> MultiStageResult:
+    """Simulates a drafter that timed out but managed to write some partial state."""
+    return MultiStageResult(
+        symbol=symbol,
+        success=False,
+        final_gate_passed=False,
+        report=None,
+        metrics=None,
+        research_notes=None,
+        critique=None,
+        outcomes=[
+            StageOutcome(
+                stage="drafter",
+                attempt=1,
+                success=False,
+                error="AgentRunError: Agent timed out after 900.0s",
+                duration_seconds=900.0,
+            )
+        ],
+        error="Drafter failed to produce report.md after all attempts",
+        partial_artifacts={
+            "drafter/research_notes.md": "# partial\n- https://www.sec.gov/example.htm\n",
+            "drafter/_progress.log": "[12:00:00] inventory_complete\n[12:03:00] web_research_done\n",
+        },
+    )
+
+
 class RunPipelineTest(unittest.TestCase):
     def test_invalid_mode_raises(self):
         with self.assertRaises(PipelineError):
@@ -437,6 +464,51 @@ class RunPipelineTest(unittest.TestCase):
 
         self.assertEqual(result["failure_count"], 1)
         self.assertFalse(result["results"][0]["success"])
+
+    @patch("src.orchestrator.run_pipeline._create_r2_client")
+    @patch("src.orchestrator.run_pipeline._create_fmp_client")
+    @patch("src.orchestrator.run_pipeline.execute_multi_stage")
+    def test_failure_uploads_partial_artifacts_to_debug_path(
+        self, mock_exec, mock_fmp_factory, mock_r2_factory
+    ):
+        """When a stage fails and partial_artifacts is non-empty, run_pipeline
+        should upload each partial file to R2 debug/{date}/{SYMBOL}/ for post-mortem."""
+        fmp = _fmp_mock_for_raw_data()
+        mock_fmp_factory.return_value = fmp
+
+        async def _exec(**kwargs):
+            return _make_failed_stage_result_with_partials(kwargs["symbol"])
+
+        mock_exec.side_effect = _exec
+
+        mock_r2 = MagicMock()
+        mock_r2_factory.return_value = mock_r2
+
+        d_path, r_path, v_path = _write_three_prompts()
+        result = run_pipeline(
+            mode="production",
+            symbols=["PCLC"],
+            drafter_prompt_path=d_path,
+            reviewer_prompt_path=r_path,
+            reviser_prompt_path=v_path,
+            concurrency=1,
+            sandbox_timeout=10,
+        )
+        self.assertEqual(result["failure_count"], 1)
+        # Final-result artifacts are absent so those uploads should NOT happen
+        mock_r2.upload_report.assert_not_called()
+        mock_r2.upload_metrics.assert_not_called()
+        # Quality-gate IS still uploaded so we can see why it failed
+        mock_r2.upload_quality_gate.assert_called_once()
+        # Debug artifacts: 2 files (research_notes.md + _progress.log)
+        self.assertEqual(mock_r2.upload_debug_artifact.call_count, 2)
+        called_paths = sorted(
+            call.args[1] for call in mock_r2.upload_debug_artifact.call_args_list
+        )
+        self.assertEqual(
+            called_paths,
+            ["drafter/_progress.log", "drafter/research_notes.md"],
+        )
 
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
     @patch("src.orchestrator.run_pipeline.execute_multi_stage")

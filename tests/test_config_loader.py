@@ -24,15 +24,18 @@ class ConfigLoaderTest(unittest.TestCase):
 
     def test_pipeline_settings(self):
         pipeline = get_pipeline_settings()
-        # Per-stage default timeout (drafter takes ~6 min so default raised to 420)
-        self.assertEqual(pipeline["sandbox_timeout_seconds"], 420)
-        # Concurrency lowered: 3-stage flow is heavy; we'd rather hit Anthropic less
-        self.assertEqual(pipeline["concurrency"], 2)
+        # Per-stage default timeout raised to 900s after observed 480s drafter timeouts
+        self.assertEqual(pipeline["sandbox_timeout_seconds"], 900)
+        # Concurrency reduced to sequential — 3-stage flow is too heavy for parallelism
+        self.assertEqual(pipeline["concurrency"], 1)
         # New multi-stage knobs
         self.assertIn("stages", pipeline)
-        self.assertEqual(pipeline["stages"]["drafter_timeout_seconds"], 480)
+        self.assertEqual(pipeline["stages"]["drafter_timeout_seconds"], 900)
+        self.assertEqual(pipeline["stages"]["reviewer_timeout_seconds"], 480)
+        self.assertEqual(pipeline["stages"]["reviser_timeout_seconds"], 600)
         self.assertEqual(pipeline["stages"]["drafter_max_attempts"], 2)
-        self.assertEqual(pipeline["max_symbols_per_run"], 5)
+        # Default max symbols per run reduced to 3 (quality > quantity, fits 120-min job ceiling)
+        self.assertEqual(pipeline["max_symbols_per_run"], 3)
 
     def test_evolution_settings(self):
         evo = get_evolution_settings()

@@ -67,35 +67,56 @@ You are running inside Claude Code with the following tools available:
 - `Grep`, `Glob` (search your own outputs and data files)
 - `WebSearch` (Google-style query → result list)
 - `WebFetch` (download and read a specific URL)
-- `Task` (spawn a focused subagent for deep dives)
+- `Task` (optional: spawn a focused subagent for very deep dives)
 
-**Use `Task` aggressively for parallelizable deep dives.** Recommended subagent dispatches (each gets its own 200k context window, so deep research is cheap):
+**Budget-aware mode (read this first):** You have **~15 minutes hard ceiling** for this stage. Plan accordingly:
 
-| Subagent identity | Input | Output |
-|---|---|---|
-| `edgar_researcher` | symbol + resolved_cik (or company name) | Business description, top-3 risk factors, dilution table, lockup, use of proceeds — all with EDGAR URLs |
-| `peer_analyst` | sector + industry + market cap band | 3 truly comparable peers with EV/Sales, P/E, P/B multiples + sources |
-| `macro_strategist` | sector + industry + macro snapshot from data/macro.json | 200-word macro/sector framing for Chapter 三 and Chapter 八 |
+- **Prefer direct `WebSearch` + `WebFetch`** for the mandatory 6 research items below — fast, lightweight, fits in budget.
+- `Task` subagents are powerful but each spawn typically costs 2–4 minutes. **Use sparingly** (at most 1, only if you genuinely need to recursively research a complex topic like reconstructing a full S-1 financial summary from a multi-section filing).
+- **Never spawn more than 1 Task subagent.** The cost outweighs the benefit within our budget.
 
-Spawn them in parallel (one Task call each) at the start of your research phase. Wait for results, then weave their findings into the appropriate chapters with proper citation.
+If you find yourself running long, prioritize: **finish the report end-to-end** with whatever evidence you've gathered rather than perfecting one chapter. A complete 6-citation report beats a half-written 12-citation one.
 
-**Take your time.** There is no rush. Use extended reasoning. A 6-minute deep report beats a 2-minute shallow one.
+### Progress heartbeat (required)
+
+As you complete each major milestone, append a timestamped line to `_progress.log` so the orchestrator can diagnose hangs/timeouts. Run:
+
+```bash
+echo "[$(date -u +%H:%M:%S)] <milestone>" >> _progress.log
+```
+
+Required milestones (write each as you reach it):
+
+1. `inventory_complete` — finished reading INDEX.md and noting populated vs empty fields
+2. `web_research_done` — finished the mandatory checklist below
+3. `chapter_<N>_drafted` — after each of 一..八
+4. `metrics_written`
+5. `self_check_done`
+
+**Take your time within the 15-minute budget.** Use extended reasoning where it matters (synthesis, valuation, scenario analysis).
 
 ---
 
-## 4. Mandatory Web Research Checklist (HARD RULE)
+## 4. Mandatory Web Research Checklist
 
-Before drafting Chapter 一, you **must** have logged in `research_notes.md` evidence for AT LEAST the following 8 items. Each entry is either a URL with a key extract, or `Searched: "<query>" → no usable result` (the latter is acceptable; fabricating is NOT).
+Before drafting Chapter 一, you **must** have logged in `research_notes.md` evidence for the **6 REQUIRED** items below. The 2 BONUS items are nice-to-have but skip them if you're running short on time.
 
-1. **EDGAR S-1 / F-1 / 424B4 prospectus** — business description + top-3 risk factors + use of proceeds + dilution.
-   - Suggested queries: `{symbol} S-1 site:sec.gov`, `{company} prospectus 424B4`, EDGAR full-text search.
-2. **Underwriters / bookrunners** (lead + joint).
-3. **Lockup period** and key insider sale restrictions.
-4. **Insider / >5% holders** (Principal Shareholders table from S-1).
-5. **12-month financial summary** (revenue, gross margin, net income — from S-1 *Summary Consolidated Financial Data*, even if data/financials.json is empty).
-6. **Industry TAM / CAGR** — at least 1 cited number from a real source (Gartner, IDC, MarkLines, Frost & Sullivan, sector association, major IB note).
-7. **Last-30-day company or sector news** — regulatory action, product launch, key contract, short report, litigation.
-8. **2 independently-sourced peer companies** with at least one valuation multiple cited each.
+Each entry is either a URL with a key extract, or `Searched: "<query>" → no usable result` (the latter is acceptable; fabricating URLs is NOT).
+
+### REQUIRED (must all appear in research_notes.md before drafting)
+
+1. **EDGAR S-1 / F-1 / 424B4 prospectus** — business description + top-3 risk factors.
+   - Suggested queries: `{symbol} S-1 site:sec.gov`, `{company} prospectus 424B4`. Use EDGAR full-text search: `https://efts.sec.gov/LATEST/search-index?q=%22{company}%22&forms=S-1`.
+2. **Underwriters / bookrunners** (lead + joint). Usually on the prospectus cover page.
+3. **Use of proceeds + lockup period** — these come from the same S-1 / 424B4 sections (Use of Proceeds, Underwriting Lock-Up Agreements).
+4. **12-month financial summary** (revenue, gross margin, net income or operating loss). Pull from S-1 *Summary Consolidated Financial Data* even if `data/financials.json` is empty.
+5. **Industry TAM / CAGR** — at least 1 cited number from a real source (Gartner, IDC, MarkLines, Frost & Sullivan, sector association, major IB note, top-tier press).
+6. **Last-30-day company or sector news** — regulatory action, product launch, key contract, short report, litigation.
+
+### BONUS (if you have budget left)
+
+7. Insider / >5% holders (Principal Shareholders table from S-1).
+8. ≥2 independently-sourced peer companies with at least one valuation multiple cited each.
 
 Prioritization (do not invert): **EDGAR / HKEX → issuer IR site → Reuters / Bloomberg / FT / WSJ / Nikkei → sector verticals**. Cross-reference any "leader / largest / first" claim against ≥2 independent sources.
 
@@ -278,9 +299,9 @@ grep -cE '^## [一二三四五六七八]、' report.md
 python -c "import json; json.load(open('metrics.json'))"
 # → must exit 0.
 
-# (f) Research notes have URLs
+# (f) Research notes have URLs (6 REQUIRED items; bonus 7-8 push you higher)
 grep -cE 'https?://' research_notes.md
-# → must be ≥ 8.
+# → must be ≥ 6 (target ≥ 8 if budget permits).
 ```
 
 If ANY check fails, fix the file in-place (use Edit), re-run the checks, and only exit when all six pass.

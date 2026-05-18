@@ -70,6 +70,10 @@ class MultiStageResult:
     critique: str | None = None
     outcomes: list[StageOutcome] = field(default_factory=list)
     error: str | None = None
+    # Diagnostic snapshots from the sandbox on failure paths. Keys are
+    # ``<bucket>/<filename>`` strings (e.g. ``drafter/report.md``); values are
+    # textual file content (may be partial). Captured BEFORE sandbox cleanup.
+    partial_artifacts: dict[str, str] = field(default_factory=dict)
 
     def as_summary(self) -> dict[str, Any]:
         """Compact dict for logging / R2 quality-gate payload."""
@@ -93,6 +97,7 @@ class MultiStageResult:
                 for o in self.outcomes
             ],
             "error": self.error,
+            "partial_artifact_keys": sorted(self.partial_artifacts.keys()),
         }
 
 
@@ -318,12 +323,69 @@ async def execute_multi_stage(
         result.outcomes = outcomes
         return result
     finally:
+        # On any non-success path, snapshot whatever the agent managed to
+        # write so we can diagnose timeouts / hangs after cleanup.
+        if not result.success and drafter_dir is not None:
+            result.partial_artifacts = _capture_partial_artifacts(
+                drafter_dir=drafter_dir,
+                reviewer_dir=reviewer_dir,
+            )
+            if result.partial_artifacts:
+                LOGGER.info(
+                    "[%s] captured %d partial artifact(s) before cleanup",
+                    symbol,
+                    len(result.partial_artifacts),
+                )
         sandbox_mgr.cleanup_paths(drafter_dir, reviewer_dir)
 
 
 # -------------------------
 # Internal helpers
 # -------------------------
+
+
+# Files we always try to snapshot on failure for post-mortem debugging.
+_PARTIAL_FILES_TO_SNAPSHOT: tuple[str, ...] = (
+    "report.md",
+    "metrics.json",
+    "research_notes.md",
+    "critique.md",
+    "_progress.log",
+    "INDEX.md",
+)
+
+
+def _capture_partial_artifacts(
+    *, drafter_dir: Path, reviewer_dir: Path | None
+) -> dict[str, str]:
+    """Read any files agents wrote so we can upload them to R2 ``debug/`` on failure.
+
+    Returns a mapping ``<bucket>/<filename> -> textual content`` (truncated to
+    256 KB per file to bound payload size). Missing files are silently skipped.
+    """
+    snapshot: dict[str, str] = {}
+    max_chars = 256 * 1024
+
+    def grab(sandbox: Path, bucket_label: str) -> None:
+        if not sandbox.exists():
+            return
+        for fname in _PARTIAL_FILES_TO_SNAPSHOT:
+            path = sandbox / fname
+            if not path.exists() or not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                LOGGER.warning("Could not read partial %s: %s", path, exc)
+                continue
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n[TRUNCATED — original {len(text)} chars]"
+            snapshot[f"{bucket_label}/{fname}"] = text
+
+    grab(drafter_dir, "drafter")
+    if reviewer_dir is not None:
+        grab(reviewer_dir, "reviewer")
+    return snapshot
 
 
 async def _run_agent_safely(

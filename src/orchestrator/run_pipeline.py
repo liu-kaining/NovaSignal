@@ -379,6 +379,12 @@ async def _run_single_pipeline(
                     stage_result.as_summary(),
                     label="quality_gate",
                 )
+                # On failure (incl. timeouts), upload whatever partial state
+                # the agent managed to write so we can post-mortem.
+                if stage_result.partial_artifacts:
+                    _upload_debug_artifacts(
+                        r2, symbol, stage_result.partial_artifacts
+                    )
 
             LOGGER.info(
                 "[%s] multi-stage complete: success=%s final_gate_passed=%s",
@@ -426,6 +432,35 @@ def _safe_upload(
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning("Unexpected upload error (%s) for %s: %s", label, symbol, exc)
     return None
+
+
+def _upload_debug_artifacts(
+    r2: R2Client, symbol: str, partials: dict[str, str]
+) -> None:
+    """Upload partial sandbox state captured on stage failure for post-mortem.
+
+    Keys are written under ``debug/{date}/{SYMBOL}/{drafter|reviewer}/{filename}``.
+    """
+    LOGGER.info(
+        "[%s] uploading %d debug artifact(s) to R2 debug/ path",
+        symbol,
+        len(partials),
+    )
+    for rel_path, content in partials.items():
+        ct = "text/markdown"
+        if rel_path.endswith(".json"):
+            ct = "application/json"
+        elif rel_path.endswith(".log"):
+            ct = "text/plain"
+        try:
+            r2.upload_debug_artifact(symbol, rel_path, content, content_type=ct)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning(
+                "Failed to upload debug artifact %s for %s: %s",
+                rel_path,
+                symbol,
+                exc,
+            )
 
 
 def _stage_config_from_settings(default_per_stage_timeout: float) -> StageConfig:

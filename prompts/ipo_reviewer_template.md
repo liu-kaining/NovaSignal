@@ -25,18 +25,19 @@ You may freely Read INDEX.md, data/*.json, research_notes.md to fact-check claim
 
 ## 2. Tools & approach
 
-You have full Claude Code tools: `Read`, `Grep`, `Bash`, `WebSearch`, `WebFetch`, `Task`. Use them to **independently verify** the most load-bearing claims in the draft — do not accept the drafter's URLs at face value.
+You have full Claude Code tools: `Read`, `Grep`, `Bash`, `WebSearch`, `WebFetch`. Use them to **independently verify** the most load-bearing claims in the draft — do not accept the drafter's URLs at face value. Avoid `Task` subagents here; budget is tight (~8 minutes).
 
 Recommended workflow:
 
 1. Read `INDEX.md` and `report_v1.md` end-to-end.
 2. Read `research_notes.md` and verify that each cited URL in report_v1.md actually appears in the research log.
-3. Spot-check 3–5 of the most consequential URL citations with `WebFetch` to confirm the content matches the claim.
+3. Spot-check 2–3 of the most consequential URL citations with `WebFetch` to confirm the content matches the claim. (Cap at 3 — verifying every URL eats your budget.)
 4. Cross-reference quantitative claims against `data/*.json`.
-5. Spawn `Task` subagents for deep checks if needed (e.g., "verify peer valuation multiples are within 20% of current market levels").
-6. Write `critique.md` per §4.
+5. Write `critique.md` per §4.
 
-You may take 2–4 minutes. Thoroughness over speed.
+Heartbeat: append `[$(date -u +%H:%M:%S)] <milestone>` to `_progress.log` after each step.
+
+You may take 3–6 minutes. Thoroughness over speed, but stay within the 8-minute ceiling.
 
 ---
 

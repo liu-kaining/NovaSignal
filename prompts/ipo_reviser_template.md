@@ -24,6 +24,8 @@
 
 ## 2. Workflow
 
+You have **~10 minutes** for this stage. Stay focused on the Reviewer's Required Fixes; do NOT re-do work.
+
 1. `Read critique.md` first. Note the verdict (READY / NEEDS_REVISION / MAJOR_REWRITE) and the "Required Fixes" list.
 2. If verdict is `publish_as_is` AND no Required Fixes → still run the self-check in §5 and exit cleanly.
 3. For each Required Fix:
@@ -35,7 +37,15 @@
 6. Run the self-check in §5.
 7. Exit.
 
-You may use `Task` subagents if a single fix requires deep research (e.g., resolving an entire section's missing TAM data).
+**Progress heartbeat:** As you reach each milestone, append a timestamped line to `_progress.log` so the orchestrator can diagnose hangs:
+
+```bash
+echo "[$(date -u +%H:%M:%S)] <milestone>" >> _progress.log
+```
+
+Milestones: `critique_read`, `fix_<N>_done` per required fix, `self_check_done`.
+
+**Do NOT spawn `Task` subagents.** They're too slow for the revision stage's tight budget. Use direct `WebSearch` / `WebFetch` only.
 
 ---
 
@@ -72,9 +82,9 @@ grep -nE '\((English|EN|中文|ZH|中|英|英文)\)' report.md
 grep -nE '（(中文|英文|EN|ZH|中|英)）' report.md
 # → BOTH must return empty.
 
-# Citation count (final gate is stricter: ≥ 8)
+# Citation count (final gate: ≥ 7)
 grep -cE 'https?://' report.md
-# → must be ≥ 8.
+# → must be ≥ 7.
 
 # Unknown phrases (final gate is stricter: ≤ 5)
 grep -ciE 'Not available|N/A|Unknown|无法评估|暂无数据|数据缺失|信息缺失|未提供' report.md

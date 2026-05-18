@@ -37,6 +37,7 @@ NovaSignal 用 **GitHub Actions** 做调度，用 **Python + FMP (Financial Mode
   * `research_notes/{YYYY-MM-DD}/{SYMBOL}_research_notes.md` — **Drafter 的 Web 研究日志（审计页）**
   * `critique/{YYYY-MM-DD}/{SYMBOL}_critique.md` — **Reviewer 的结构化评审**
   * `quality_gate/{YYYY-MM-DD}/{SYMBOL}_gate.json` — Stage outcome 与最终 gate 结果（供 evolution pipeline 使用）
+  * `debug/{YYYY-MM-DD}/{SYMBOL}/{stage}/{file}` — **失败诊断**：阶段超时/崩溃时保留的部分沙箱状态（如未完成的 `research_notes.md` / `_progress.log`），用于 post-mortem 分析
   * `raw_data/{YYYY-MM-DD}/{SYMBOL}_raw_data.json` — 输入侧 FMP 快照
   * `raw_data/_shared/{YYYY-MM-DD}/fmp_prefetch_bundle.json` — 全局预取包
   * `state/{YYYY-MM-DD}/{SYMBOL}_state.json` — 状态机日志
