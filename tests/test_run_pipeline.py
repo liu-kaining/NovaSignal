@@ -2,13 +2,17 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
+from src.orchestrator.multi_stage_runner import (
+    MultiStageResult,
+    StageOutcome,
+)
 from src.orchestrator.run_pipeline import (
     PipelineError,
+    _build_raw_data,
     _discover_symbols,
     _load_prompt,
-    _build_raw_data,
     run_pipeline,
 )
 
@@ -263,6 +267,35 @@ class ParseReportStorageKeyTest(unittest.TestCase):
         self.assertIsNone(parse_report_storage_key("metrics/2026-01-01/AAPL_metrics.json"))
 
 
+def _write_three_prompts() -> tuple[str, str, str]:
+    """Write tiny placeholder drafter/reviewer/reviser prompts and return paths."""
+    paths = []
+    for label in ("drafter", "reviewer", "reviser"):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=f"_{label}.md", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(f"# {label.title()} Prompt (test)")
+            paths.append(f.name)
+    return tuple(paths)  # type: ignore[return-value]
+
+
+def _make_successful_stage_result(symbol: str) -> MultiStageResult:
+    return MultiStageResult(
+        symbol=symbol,
+        success=True,
+        final_gate_passed=True,
+        report="# Final Report",
+        metrics={"confidence": 0.7, "subscription_recommendation": "subscribe"},
+        research_notes="# Research Notes",
+        critique="# Critique",
+        outcomes=[
+            StageOutcome(stage="drafter", attempt=1, success=True, duration_seconds=1.0),
+            StageOutcome(stage="reviewer", attempt=1, success=True, duration_seconds=0.5),
+            StageOutcome(stage="reviser", attempt=1, success=True, duration_seconds=0.5),
+        ],
+    )
+
+
 class RunPipelineTest(unittest.TestCase):
     def test_invalid_mode_raises(self):
         with self.assertRaises(PipelineError):
@@ -277,7 +310,13 @@ class RunPipelineTest(unittest.TestCase):
         ]
         mock_fmp_factory.return_value = fmp
 
-        result = run_pipeline(mode="discovery-only")
+        d_path, r_path, v_path = _write_three_prompts()
+        result = run_pipeline(
+            mode="discovery-only",
+            drafter_prompt_path=d_path,
+            reviewer_prompt_path=r_path,
+            reviser_prompt_path=v_path,
+        )
         self.assertEqual(result["mode"], "discovery-only")
         self.assertEqual(result["symbols"], ["AAPL"])
         self.assertEqual(result["results"], [])
@@ -285,40 +324,26 @@ class RunPipelineTest(unittest.TestCase):
 
     @patch("src.orchestrator.run_pipeline._create_r2_client")
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
-    @patch("src.orchestrator.run_pipeline.invoke_agent")
-    @patch("src.orchestrator.run_pipeline.SandboxManager")
-    def test_production_mode_full_flow(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory, mock_r2_factory):
-        # Setup FMP
+    @patch("src.orchestrator.run_pipeline.execute_multi_stage")
+    def test_production_mode_full_flow(self, mock_exec, mock_fmp_factory, mock_r2_factory):
         fmp = _fmp_mock_for_raw_data()
         mock_fmp_factory.return_value = fmp
 
-        # Setup sandbox
-        mock_sandbox = MagicMock()
-        mock_sandbox_cls.return_value = mock_sandbox
-        mock_context = MagicMock()
-        mock_context.sandbox_dir = Path("/tmp/fake")
-        mock_sandbox.create.return_value = mock_context
-        mock_sandbox.extract_results.return_value = {
-            "report": "# Report",
-            "metrics": {"confidence": 0.8},
-        }
+        async def _exec(**kwargs):
+            return _make_successful_stage_result(kwargs["symbol"])
 
-        # Setup agent
-        mock_invoke.return_value = MagicMock(success=True)
+        mock_exec.side_effect = _exec
 
-        # Setup R2
         mock_r2 = MagicMock()
         mock_r2_factory.return_value = mock_r2
 
-        # Create temp prompt
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-            f.write("Analyze this.")
-            prompt_path = f.name
-
+        d_path, r_path, v_path = _write_three_prompts()
         result = run_pipeline(
             mode="production",
             symbols=["AAPL"],
-            prompt_path=prompt_path,
+            drafter_prompt_path=d_path,
+            reviewer_prompt_path=r_path,
+            reviser_prompt_path=v_path,
             concurrency=1,
             sandbox_timeout=10,
         )
@@ -330,31 +355,31 @@ class RunPipelineTest(unittest.TestCase):
         mock_r2.upload_raw_data.assert_called_once()
         mock_r2.upload_report.assert_called_once()
         mock_r2.upload_metrics.assert_called_once()
-        mock_sandbox.cleanup.assert_called_once()
+        mock_r2.upload_research_notes.assert_called_once()
+        mock_r2.upload_critique.assert_called_once()
+        mock_r2.upload_quality_gate.assert_called_once()
 
     @patch("src.orchestrator.run_pipeline._create_r2_client")
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
-    @patch("src.orchestrator.run_pipeline.invoke_agent")
-    @patch("src.orchestrator.run_pipeline.SandboxManager")
+    @patch("src.orchestrator.run_pipeline.execute_multi_stage")
     def test_production_skip_upload_does_not_touch_r2(
-        self, mock_sandbox_cls, mock_invoke, mock_fmp_factory, mock_r2_factory
+        self, mock_exec, mock_fmp_factory, mock_r2_factory
     ):
         fmp = _fmp_mock_for_raw_data()
         mock_fmp_factory.return_value = fmp
-        mock_sandbox = MagicMock()
-        mock_sandbox_cls.return_value = mock_sandbox
-        mock_context = MagicMock()
-        mock_context.sandbox_dir = Path("/tmp/fake")
-        mock_sandbox.create.return_value = mock_context
-        mock_sandbox.extract_results.return_value = {"report": "# R", "metrics": {}}
-        mock_invoke.return_value = MagicMock(success=True)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-            f.write("Prompt")
-            prompt_path = f.name
+
+        async def _exec(**kwargs):
+            return _make_successful_stage_result(kwargs["symbol"])
+
+        mock_exec.side_effect = _exec
+
+        d_path, r_path, v_path = _write_three_prompts()
         result = run_pipeline(
             mode="production",
             symbols=["AAPL"],
-            prompt_path=prompt_path,
+            drafter_prompt_path=d_path,
+            reviewer_prompt_path=r_path,
+            reviser_prompt_path=v_path,
             skip_upload=True,
             concurrency=1,
             sandbox_timeout=10,
@@ -363,64 +388,79 @@ class RunPipelineTest(unittest.TestCase):
         mock_r2_factory.assert_not_called()
 
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
-    @patch("src.orchestrator.run_pipeline.invoke_agent")
-    @patch("src.orchestrator.run_pipeline.SandboxManager")
-    def test_dev_mode_skips_upload(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory):
+    @patch("src.orchestrator.run_pipeline.execute_multi_stage")
+    def test_dev_mode_skips_upload(self, mock_exec, mock_fmp_factory):
         fmp = _fmp_mock_for_raw_data()
         mock_fmp_factory.return_value = fmp
 
-        mock_sandbox = MagicMock()
-        mock_sandbox_cls.return_value = mock_sandbox
-        mock_context = MagicMock()
-        mock_context.sandbox_dir = Path("/tmp/fake")
-        mock_sandbox.create.return_value = mock_context
-        mock_sandbox.extract_results.return_value = {"report": "# Dev Report", "metrics": None}
+        async def _exec(**kwargs):
+            return _make_successful_stage_result(kwargs["symbol"])
 
-        mock_invoke.return_value = MagicMock(success=True)
+        mock_exec.side_effect = _exec
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-            f.write("Prompt")
-            prompt_path = f.name
-
+        d_path, r_path, v_path = _write_three_prompts()
         result = run_pipeline(
             mode="dev",
             symbols=["TEST"],
-            prompt_path=prompt_path,
+            drafter_prompt_path=d_path,
+            reviewer_prompt_path=r_path,
+            reviser_prompt_path=v_path,
         )
 
         self.assertEqual(result["mode"], "dev")
         self.assertEqual(result["success_count"], 1)
 
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
-    @patch("src.orchestrator.run_pipeline.invoke_agent")
-    @patch("src.orchestrator.run_pipeline.SandboxManager")
-    def test_agent_failure_captured(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory):
-        from src.orchestrator.async_runner import AgentRunError
-
+    @patch("src.orchestrator.run_pipeline.execute_multi_stage")
+    def test_agent_failure_captured(self, mock_exec, mock_fmp_factory):
         fmp = _fmp_mock_for_raw_data()
         mock_fmp_factory.return_value = fmp
 
-        mock_sandbox = MagicMock()
-        mock_sandbox_cls.return_value = mock_sandbox
-        mock_context = MagicMock()
-        mock_context.sandbox_dir = Path("/tmp/fake")
-        mock_sandbox.create.return_value = mock_context
+        async def _exec(**kwargs):
+            return MultiStageResult(
+                symbol=kwargs["symbol"],
+                success=False,
+                final_gate_passed=False,
+                error="Drafter failed to produce report.md after all attempts",
+            )
 
-        mock_invoke.side_effect = AgentRunError("timeout")
+        mock_exec.side_effect = _exec
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-            f.write("Prompt")
-            prompt_path = f.name
-
+        d_path, r_path, v_path = _write_three_prompts()
         result = run_pipeline(
             mode="dev",
             symbols=["FAIL"],
-            prompt_path=prompt_path,
+            drafter_prompt_path=d_path,
+            reviewer_prompt_path=r_path,
+            reviser_prompt_path=v_path,
         )
 
         self.assertEqual(result["failure_count"], 1)
         self.assertFalse(result["results"][0]["success"])
-        mock_sandbox.cleanup.assert_called_once()
+
+    @patch("src.orchestrator.run_pipeline._create_fmp_client")
+    @patch("src.orchestrator.run_pipeline.execute_multi_stage")
+    def test_max_symbols_caps_run(self, mock_exec, mock_fmp_factory):
+        fmp = _fmp_mock_for_raw_data()
+        mock_fmp_factory.return_value = fmp
+
+        async def _exec(**kwargs):
+            return _make_successful_stage_result(kwargs["symbol"])
+
+        mock_exec.side_effect = _exec
+
+        d_path, r_path, v_path = _write_three_prompts()
+        result = run_pipeline(
+            mode="dev",
+            symbols=["A", "B", "C", "D", "E", "F", "G"],
+            drafter_prompt_path=d_path,
+            reviewer_prompt_path=r_path,
+            reviser_prompt_path=v_path,
+            max_symbols=3,
+        )
+
+        self.assertEqual(len(result["symbols"]), 3)
+        self.assertEqual(result["success_count"], 3)
 
 
 if __name__ == "__main__":

@@ -21,15 +21,40 @@ r2:
     max_wait_seconds: 8
 
 pipeline:
-  model: ""          # empty = CLI default (claude-sonnet-4-6)
+  # Quality > quantity. Each symbol takes 6–10 min through the 3-stage flow.
+  # 3–5 high-quality reports per cron beats 20 mediocre ones.
+  model: ""          # empty = CLI default; opus-4-x strongly recommended for production quality
   base_url: ""       # empty = official Anthropic API
-  sandbox_timeout_seconds: 300
-  concurrency: 4
+  sandbox_timeout_seconds: 420   # per-stage default; overridden by stages.* below
+  concurrency: 2     # 3-stage flow is heavy; keep low to avoid Anthropic rate limits
+  max_symbols_per_run: 5
   modes:
     - discovery-only
     - production
     - dev
   agent_command: "claude --print --dangerously-skip-permissions"
+
+  # Per-stage timeouts and retry budgets for the Drafter → Reviewer → Reviser flow
+  stages:
+    drafter_timeout_seconds: 480     # Stage A: research + draft (the heaviest)
+    reviewer_timeout_seconds: 300    # Stage B: critique (lighter)
+    reviser_timeout_seconds: 360     # Stage C: surgical edits + final self-check
+    drafter_max_attempts: 2          # 1 normal + up to 1 QA-feedback retry
+    reviser_max_attempts: 2
+    url_verify_sample: 5             # HEAD-check sample size from report URLs
+    url_verify_timeout: 5
+    skip_url_verification: false     # set true in dev to avoid network hits
+
+  # QA gate thresholds (advisory — actual thresholds live in quality_gate.py)
+  # Documented here so operators can quickly see the current contract.
+  quality_gate_notes:
+    draft_min_urls: 6
+    final_min_urls: 8
+    draft_max_unknown_phrases: 8
+    final_max_unknown_phrases: 5
+    required_chapters: 8
+    draft_max_null_metric_fields: 5
+    final_max_null_metric_fields: 3
 
 evolution:
   deviation_threshold: 0.15

@@ -154,6 +154,49 @@ class R2Client:
         self._put_object(key, body, content_type="application/json")
         return key
 
+    def upload_research_notes(
+        self,
+        symbol: str,
+        content: str,
+        report_date: str | date | datetime | None = None,
+    ) -> str:
+        """Upload the agent's Web-research log (Stage A artifact)."""
+        date_str = _resolve_date(report_date)
+        key = f"research_notes/{date_str}/{symbol.upper()}_research_notes.md"
+        self._put_object(key, content.encode("utf-8"), content_type="text/markdown")
+        return key
+
+    def upload_critique(
+        self,
+        symbol: str,
+        content: str,
+        report_date: str | date | datetime | None = None,
+    ) -> str:
+        """Upload the Reviewer's structured critique (Stage B artifact)."""
+        date_str = _resolve_date(report_date)
+        key = f"critique/{date_str}/{symbol.upper()}_critique.md"
+        self._put_object(key, content.encode("utf-8"), content_type="text/markdown")
+        return key
+
+    def upload_quality_gate(
+        self,
+        symbol: str,
+        gate_payload: dict[str, Any],
+        report_date: str | date | datetime | None = None,
+    ) -> str:
+        """Upload final QA-gate result + multi-stage outcome trace.
+
+        Used by the evolution pipeline to identify systematically weak symbols
+        and trigger prompt corrections.
+        """
+        date_str = _resolve_date(report_date)
+        key = f"quality_gate/{date_str}/{symbol.upper()}_gate.json"
+        body = json.dumps(
+            gate_payload, indent=2, ensure_ascii=False, default=str
+        ).encode("utf-8")
+        self._put_object(key, body, content_type="application/json")
+        return key
+
     def download_file(self, key: str) -> bytes:
         """Download a file from R2 by key. Returns raw bytes."""
         LOGGER.info("Downloading %s from bucket %s", key, self.bucket_name)

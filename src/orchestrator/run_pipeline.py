@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.fetchers.fmp_client import FMPClient, configure_logging
-from src.orchestrator.async_runner import AgentRunError, invoke_agent
+from src.orchestrator.async_runner import AgentRunError
+from src.orchestrator.multi_stage_runner import (
+    MultiStageResult,
+    StageConfig,
+    execute_multi_stage,
+)
 from src.orchestrator.sandbox_manager import SandboxError, SandboxManager
 from src.storage.r2_client import R2Client, R2StorageError, parse_report_storage_key
 
@@ -100,17 +105,32 @@ def run_pipeline(
     lookback_days: int = 7,
     concurrency: int = 4,
     sandbox_timeout: float = 300,
-    prompt_path: str | Path = "prompts/ipo_v1_template.md",
+    drafter_prompt_path: str | Path = "prompts/ipo_drafter_template.md",
+    reviewer_prompt_path: str | Path = "prompts/ipo_reviewer_template.md",
+    reviser_prompt_path: str | Path = "prompts/ipo_reviser_template.md",
     skip_upload: bool = False,
     model: str | None = None,
     base_url: str | None = None,
+    max_symbols: int | None = None,
+    stage_config: StageConfig | None = None,
 ) -> dict[str, Any]:
     """Execute the NovaSignal analysis pipeline.
 
     Modes:
         discovery-only: Fetch IPO calendar and output discovered symbols.
-        production: Full pipeline (discover -> sandbox -> agent -> upload).
+        production: Full pipeline (discover → drafter → reviewer → reviser → upload).
         dev: Like production but skips R2 upload and prints results.
+
+    The production path now runs each symbol through a 3-stage agentic flow:
+        A. Drafter   — research + draft report.md + metrics.json + research_notes.md
+        B. Reviewer  — independent critique → critique.md
+        C. Reviser   — surgical edits per critique → final report.md / metrics.json
+
+    Between stages, a Python-side quality gate validates outputs and can trigger
+    one retry per drafting stage with the failures fed back as instructions.
+
+    ``max_symbols`` caps the number of symbols processed in a single run (the
+    PRD recommends 3–5 high-quality reports per cron, not 20 mediocre ones).
 
     ``skip_upload`` (production only): run agents and FMP prefetches but do not
     call R2; also skips listing R2 for symbol deduplication (for local/CI dry runs).
@@ -134,6 +154,15 @@ def run_pipeline(
         except Exception as exc:
             LOGGER.warning("Failed to check existing reports for deduplication: %s", exc)
 
+    if max_symbols is not None and max_symbols > 0:
+        if len(discovered) > max_symbols:
+            LOGGER.info(
+                "Capping discovered symbols from %d to max_symbols=%d (quality > quantity)",
+                len(discovered),
+                max_symbols,
+            )
+            discovered = discovered[:max_symbols]
+
     symbol_names = [e["symbol"] for e in discovered]
 
     if mode == "discovery-only":
@@ -141,8 +170,10 @@ def run_pipeline(
         _persist_discovery(discovered)
         return {"mode": mode, "symbols": symbol_names, "results": []}
 
-    # Phase 2: Load prompt template
-    prompt_content = _load_prompt(prompt_path)
+    # Phase 2: Load prompt templates (drafter / reviewer / reviser)
+    drafter_prompt = _load_prompt(drafter_prompt_path)
+    reviewer_prompt = _load_prompt(reviewer_prompt_path)
+    reviser_prompt = _load_prompt(reviser_prompt_path)
 
     prefetch_errs: list[dict[str, str]] = []
     ipo_regulatory_lists: dict[str, list[dict[str, Any]]] = {
@@ -187,7 +218,9 @@ def run_pipeline(
         _run_all_agents(
             discovery_entries=discovered,
             fmp=fmp,
-            prompt_content=prompt_content,
+            drafter_prompt=drafter_prompt,
+            reviewer_prompt=reviewer_prompt,
+            reviser_prompt=reviser_prompt,
             sandbox_mgr=sandbox_mgr,
             r2=r2,
             concurrency=concurrency,
@@ -196,6 +229,7 @@ def run_pipeline(
             base_url=base_url,
             ipo_regulatory_lists=ipo_regulatory_lists,
             global_market_context=global_market_context,
+            stage_config=stage_config,
         )
     )
 
@@ -222,7 +256,9 @@ async def _run_all_agents(
     *,
     discovery_entries: list[dict[str, Any]],
     fmp: FMPClient,
-    prompt_content: str,
+    drafter_prompt: str,
+    reviewer_prompt: str,
+    reviser_prompt: str,
     sandbox_mgr: SandboxManager,
     r2: R2Client | None,
     concurrency: int,
@@ -231,16 +267,23 @@ async def _run_all_agents(
     base_url: str | None = None,
     ipo_regulatory_lists: dict[str, list[dict[str, Any]]] | None = None,
     global_market_context: dict[str, Any] | None = None,
+    stage_config: StageConfig | None = None,
 ) -> list[dict[str, Any]]:
-    """Run agent invocations with bounded concurrency."""
+    """Run multi-stage pipelines with bounded concurrency.
+
+    With three Claude invocations per symbol, the effective per-symbol wall time
+    is ~6–10 min. Concurrency therefore should usually be modest (1–3).
+    """
     semaphore = asyncio.Semaphore(concurrency)
     ipo_lists = ipo_regulatory_lists or {"disclosures": [], "prospectuses": []}
     gmc = global_market_context
     tasks = [
-        _run_single_agent(
+        _run_single_pipeline(
             entry=entry,
             fmp=fmp,
-            prompt_content=prompt_content,
+            drafter_prompt=drafter_prompt,
+            reviewer_prompt=reviewer_prompt,
+            reviser_prompt=reviser_prompt,
             sandbox_mgr=sandbox_mgr,
             r2=r2,
             timeout=timeout,
@@ -249,17 +292,20 @@ async def _run_all_agents(
             base_url=base_url,
             ipo_regulatory_lists=ipo_lists,
             global_market_context=gmc,
+            stage_config=stage_config,
         )
         for entry in discovery_entries
     ]
     return await asyncio.gather(*tasks)
 
 
-async def _run_single_agent(
+async def _run_single_pipeline(
     *,
     entry: dict[str, Any],
     fmp: FMPClient,
-    prompt_content: str,
+    drafter_prompt: str,
+    reviewer_prompt: str,
+    reviser_prompt: str,
     sandbox_mgr: SandboxManager,
     r2: R2Client | None,
     timeout: float,
@@ -268,11 +314,15 @@ async def _run_single_agent(
     base_url: str | None = None,
     ipo_regulatory_lists: dict[str, list[dict[str, Any]]] | None = None,
     global_market_context: dict[str, Any] | None = None,
+    stage_config: StageConfig | None = None,
 ) -> dict[str, Any]:
-    """Execute a single agent run within a sandbox."""
+    """Execute the 3-stage Drafter → Reviewer → Reviser pipeline for one symbol.
+
+    Uploads all artifacts (report, metrics, research_notes, critique,
+    quality_gate trace) to R2 when ``r2`` is provided.
+    """
     symbol = entry["symbol"]
     async with semaphore:
-        context = None
         try:
             raw_data = _build_raw_data(
                 entry,
@@ -281,41 +331,8 @@ async def _run_single_agent(
                 global_market_context=global_market_context,
             )
             if r2:
-                r2.upload_raw_data(symbol, raw_data)
-            context = sandbox_mgr.create(symbol, raw_data, prompt_content)
+                _safe_upload(r2.upload_raw_data, symbol, raw_data, label="raw_data")
 
-            agent_instruction = (
-                "[NovaSignal IPO research agent v3 — production]\n"
-                "STEP 1. Read prompt.md (the product contract, v3) and raw_data.json in cwd. "
-                "Skim every top-level key in raw_data.json; build a mental inventory of which "
-                "fields are populated vs null/empty (especially ipo_data, company_profile, "
-                "financials.*, fundraising, news_context, sec_filings_recent, "
-                "ipo_regulatory_context, ownership_governance, sell_side, global_market_context). "
-                "Also read fetch_errors so you know which FMP calls failed upstream.\n"
-                "STEP 2. Execute the Mandatory Web Research Checklist in prompt.md §3.3 "
-                "(8 items). Use WebSearch / WebFetch aggressively. EDGAR / HKEX disclosure / "
-                "issuer IR first, then Reuters/Bloomberg/FT/WSJ/Nikkei, then sector verticals. "
-                "Target a MINIMUM of 8 distinct web research actions; record real URLs. "
-                "If a query truly yields nothing, log it verbatim in the report as "
-                "'Searched: \"<query>\" — no usable result' rather than writing 'Unknown'.\n"
-                "STEP 3. Draft report.md following prompt.md §3.1 HARD HEADER RULES exactly: "
-                "ONE H2 per chapter in the form '## N、中文标题 (English Title)'. "
-                "NEVER add '(English)', '(EN)', '(中文)', '(ZH)', '(英)' or '(中)' tags after a header. "
-                "NEVER split a chapter into separate English and Chinese H2s. "
-                "Body must alternate English paragraph → Chinese paragraph (paragraph-level), "
-                "with no language label inside paragraphs.\n"
-                "STEP 4. Write metrics.json — strict JSON, at most 5 null/Unknown fields. "
-                "If you have more nulls than that, return to STEP 2 and search more.\n"
-                "STEP 5. PRE-SUBMIT SELF-CHECK (mandatory; do not skip):\n"
-                "  (a) Run `grep -nE '\\((English|EN|中文|ZH|中|英)\\)|（(中文|英文|EN|ZH)）' report.md` "
-                "in the sandbox shell. If ANY match, delete every occurrence and restructure that section.\n"
-                "  (b) Run `grep -c 'http' report.md` — must be ≥ 6. If not, add more cited findings.\n"
-                "  (c) Run `grep -cE 'Not available|Unknown|无法评估|暂无数据' report.md` — must be ≤ 8.\n"
-                "  (d) Confirm all 8 chapters + References + Disclaimer exist.\n"
-                "  (e) Validate metrics.json parses and matches the four-tier recommendation in the body.\n"
-                "Cite real URLs only — fabricating links is a critical failure. "
-                "Produce report.md and metrics.json in the working directory; do not write any other files."
-            )
             env_vars: dict[str, str] = {
                 "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", ""),
             }
@@ -323,26 +340,71 @@ async def _run_single_agent(
             if effective_base_url:
                 env_vars["ANTHROPIC_BASE_URL"] = effective_base_url
 
-            result = await invoke_agent(
-                agent_instruction,
-                working_dir=context.sandbox_dir,
-                timeout_seconds=timeout,
+            cfg = stage_config or _stage_config_from_settings(timeout)
+
+            stage_result: MultiStageResult = await execute_multi_stage(
+                symbol=symbol,
+                raw_data=raw_data,
+                drafter_prompt=drafter_prompt,
+                reviewer_prompt=reviewer_prompt,
+                reviser_prompt=reviser_prompt,
+                sandbox_mgr=sandbox_mgr,
                 env_vars=env_vars,
                 model=model,
+                stage_config=cfg,
             )
 
-            outputs = sandbox_mgr.extract_results(context)
+            if r2:
+                if stage_result.report:
+                    _safe_upload(r2.upload_report, symbol, stage_result.report, label="report")
+                if stage_result.metrics:
+                    _safe_upload(r2.upload_metrics, symbol, stage_result.metrics, label="metrics")
+                if stage_result.research_notes:
+                    _safe_upload(
+                        r2.upload_research_notes,
+                        symbol,
+                        stage_result.research_notes,
+                        label="research_notes",
+                    )
+                if stage_result.critique:
+                    _safe_upload(
+                        r2.upload_critique,
+                        symbol,
+                        stage_result.critique,
+                        label="critique",
+                    )
+                _safe_upload(
+                    r2.upload_quality_gate,
+                    symbol,
+                    stage_result.as_summary(),
+                    label="quality_gate",
+                )
 
-            if r2 and outputs.get("report"):
-                r2.upload_report(symbol, outputs["report"])
-            if r2 and outputs.get("metrics"):
-                r2.upload_metrics(symbol, outputs["metrics"])
-
+            LOGGER.info(
+                "[%s] multi-stage complete: success=%s final_gate_passed=%s",
+                symbol,
+                stage_result.success,
+                stage_result.final_gate_passed,
+            )
             return {
                 "symbol": symbol,
-                "success": True,
-                "report": outputs.get("report"),
-                "metrics": outputs.get("metrics"),
+                "success": stage_result.success,
+                "final_gate_passed": stage_result.final_gate_passed,
+                "report": stage_result.report,
+                "metrics": stage_result.metrics,
+                "research_notes_chars": len(stage_result.research_notes or ""),
+                "critique_chars": len(stage_result.critique or ""),
+                "stage_outcomes": [
+                    {
+                        "stage": o.stage,
+                        "attempt": o.attempt,
+                        "success": o.success,
+                        "duration_seconds": o.duration_seconds,
+                        "error": o.error,
+                    }
+                    for o in stage_result.outcomes
+                ],
+                "error": stage_result.error,
             }
 
         except (AgentRunError, SandboxError) as exc:
@@ -351,9 +413,41 @@ async def _run_single_agent(
         except R2StorageError as exc:
             LOGGER.error("Upload failed for %s: %s", symbol, exc)
             return {"symbol": symbol, "success": False, "error": f"Upload: {exc}"}
-        finally:
-            if context:
-                sandbox_mgr.cleanup(context)
+
+
+def _safe_upload(
+    fn: Callable[..., str], symbol: str, payload: Any, *, label: str
+) -> str | None:
+    """Best-effort R2 upload — never aborts pipeline."""
+    try:
+        return fn(symbol, payload)
+    except R2StorageError as exc:
+        LOGGER.warning("R2 upload (%s) failed for %s: %s", label, symbol, exc)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("Unexpected upload error (%s) for %s: %s", label, symbol, exc)
+    return None
+
+
+def _stage_config_from_settings(default_per_stage_timeout: float) -> StageConfig:
+    """Derive StageConfig from config/settings.yaml (with safe fallbacks)."""
+    try:
+        from config.loader import get_pipeline_settings
+
+        pipe = get_pipeline_settings()
+    except Exception:
+        pipe = {}
+
+    stages = pipe.get("stages") or {}
+    return StageConfig(
+        drafter_timeout=float(stages.get("drafter_timeout_seconds", default_per_stage_timeout)),
+        reviewer_timeout=float(stages.get("reviewer_timeout_seconds", default_per_stage_timeout * 0.7)),
+        reviser_timeout=float(stages.get("reviser_timeout_seconds", default_per_stage_timeout * 0.85)),
+        drafter_max_attempts=int(stages.get("drafter_max_attempts", 2)),
+        reviser_max_attempts=int(stages.get("reviser_max_attempts", 2)),
+        url_verify_sample=int(stages.get("url_verify_sample", 5)),
+        url_verify_timeout=float(stages.get("url_verify_timeout", 5)),
+        skip_url_verification=bool(stages.get("skip_url_verification", False)),
+    )
 
 
 def _discover_symbols(
@@ -1067,14 +1161,30 @@ def main() -> None:
         help="Sandbox timeout in seconds",
     )
     parser.add_argument(
-        "--prompt",
-        default="prompts/ipo_v1_template.md",
-        help="Path to prompt template",
+        "--drafter-prompt",
+        default="prompts/ipo_drafter_template.md",
+        help="Path to drafter (Stage A) prompt template",
+    )
+    parser.add_argument(
+        "--reviewer-prompt",
+        default="prompts/ipo_reviewer_template.md",
+        help="Path to reviewer (Stage B) prompt template",
+    )
+    parser.add_argument(
+        "--reviser-prompt",
+        default="prompts/ipo_reviser_template.md",
+        help="Path to reviser (Stage C) prompt template",
+    )
+    parser.add_argument(
+        "--max-symbols",
+        type=int,
+        default=int(pipe.get("max_symbols_per_run", 5)),
+        help="Cap on symbols processed per run (quality > quantity; default 5)",
     )
     parser.add_argument(
         "--model",
         default=None,
-        help="Claude model to use (default: CLI default, e.g. claude-sonnet-4-6)",
+        help="Claude model to use (default: CLI default; opus-4-x recommended for production)",
     )
     parser.add_argument(
         "--base-url",
@@ -1102,10 +1212,13 @@ def main() -> None:
             lookback_days=args.lookback_days,
             concurrency=args.concurrency,
             sandbox_timeout=args.timeout,
-            prompt_path=args.prompt,
+            drafter_prompt_path=args.drafter_prompt,
+            reviewer_prompt_path=args.reviewer_prompt,
+            reviser_prompt_path=args.reviser_prompt,
             model=model,
             base_url=base_url,
             skip_upload=args.skip_upload,
+            max_symbols=args.max_symbols if args.max_symbols > 0 else None,
         )
         if summary["results"]:
             failed = summary.get("failure_count", 0)
