@@ -75,7 +75,7 @@ class SandboxManager:
 
         try:
             context.raw_data_path.write_text(
-                json.dumps(raw_data, indent=2, ensure_ascii=False),
+                json.dumps(raw_data, indent=2, ensure_ascii=False, default=str),
                 encoding="utf-8",
             )
             context.prompt_path.write_text(prompt_content, encoding="utf-8")

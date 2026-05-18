@@ -1,16 +1,27 @@
 {{ define "title" }}NovaSignal 研报{{ end }}
 {{ define "main" }}
-  {{ $lim := 20 }}
-  {{ with site.Data.novasignal_build }}{{ with .home_report_limit }}{{ $lim = int . }}{{ end }}{{ end }}
+  {{ $pageSize := 20 }}
+  {{ with site.Data.novasignal_build }}
+    {{ with .home_report_limit }}{{ $pageSize = int . }}{{ end }}
+    {{ with .reports_per_page }}{{ $pageSize = int . }}{{ end }}
+  {{ end }}
   {{ $reports := where site.RegularPages "Section" "reports" }}
-  {{ $sorted := sort $reports "Date" "desc" }}
+  {{ $sorted := sort $reports "Weight" "asc" }}
+  {{ $paginator := .Paginate $sorted $pageSize }}
 <header class="hero">
   <h1>NovaSignal 研报</h1>
-  <p>IPO 情报 · 流水线自动生成 · Hugo 渲染</p>
-  <div class="stats">已同步 {{ len $reports }} 份 · 本页展示 {{ $lim }} 份</div>
+  <p>IPO 投资决策情报 · 流水线同步 R2 · Hugo 渲染</p>
+  <div class="stats">
+    共 <strong>{{ len $sorted }}</strong> 份报告
+    {{- if gt $paginator.TotalPages 1 -}}
+    · 第 {{ $paginator.PageNumber }} / {{ $paginator.TotalPages }} 页 · 本页 {{ len $paginator.Pages }} 条
+    {{- else -}}
+    · 本页 {{ len $paginator.Pages }} 条
+    {{- end -}}
+  </div>
 </header>
 <ul class="report-list">
-  {{ range first $lim $sorted }}
+  {{ range $paginator.Pages }}
   <li>
     <a href="{{ .RelPermalink }}">
       <span class="sym">{{ .Params.symbol }}</span>
@@ -19,4 +30,19 @@
   </li>
   {{ end }}
 </ul>
+{{ if gt $paginator.TotalPages 1 }}
+<nav class="pagination" aria-label="分页">
+  {{ if $paginator.HasPrev }}
+  <a class="pager-link pager-prev" href="{{ $paginator.Prev.URL }}" rel="prev">← 上一页</a>
+  {{ else }}
+  <span class="pager-spacer"></span>
+  {{ end }}
+  <span class="pager-info">{{ $paginator.PageNumber }} / {{ $paginator.TotalPages }}</span>
+  {{ if $paginator.HasNext }}
+  <a class="pager-link pager-next" href="{{ $paginator.Next.URL }}" rel="next">下一页 →</a>
+  {{ else }}
+  <span class="pager-spacer"></span>
+  {{ end }}
+</nav>
+{{ end }}
 {{ end }}

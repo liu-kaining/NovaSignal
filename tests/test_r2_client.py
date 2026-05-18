@@ -61,6 +61,26 @@ class R2ClientTest(unittest.TestCase):
         parsed = json.loads(call_kwargs["Body"])
         self.assertEqual(parsed["confidence"], 0.85)
 
+    def test_upload_raw_data_key_and_default_str(self):
+        client, mock_s3 = self._make_client()
+        raw = {"symbol": "AAPL", "deep": {"d": date(2026, 1, 1)}}
+        key = client.upload_raw_data("aapl", raw, report_date="2026-02-01")
+
+        self.assertEqual(key, "raw_data/2026-02-01/AAPL_raw_data.json")
+        call_kwargs = mock_s3.put_object.call_args[1]
+        self.assertEqual(call_kwargs["ContentType"], "application/json")
+        parsed = json.loads(call_kwargs["Body"])
+        self.assertEqual(parsed["symbol"], "AAPL")
+        self.assertEqual(parsed["deep"]["d"], "2026-01-01")
+
+    def test_upload_fmp_prefetch_bundle_key(self):
+        client, mock_s3 = self._make_client()
+        bundle = {"ipo_regulatory_lists": {"disclosures": []}, "global_market_context": {}}
+        key = client.upload_fmp_prefetch_bundle(bundle, report_date="2026-03-01")
+
+        self.assertEqual(key, "raw_data/_shared/2026-03-01/fmp_prefetch_bundle.json")
+        mock_s3.put_object.assert_called_once()
+
     def test_upload_state_log_key_structure(self):
         client, mock_s3 = self._make_client()
         state = {"status": "completed", "agent_version": "1.0"}

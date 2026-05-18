@@ -118,6 +118,339 @@ class FMPClient:
             f"Unexpected response type for stock price: {type(data).__name__}"
         )
 
+    def get_company_profile(self, symbol: str) -> dict[str, Any]:
+        """Alias for :meth:`get_stock_price` — FMP ``/profile`` includes fundamentals + identifiers."""
+        return self.get_stock_price(symbol)
+
+    def get_company_notes(self, symbol: str) -> list[dict[str, Any]]:
+        """Company descriptive notes / footnotes (``/company-notes``)."""
+        trimmed = _require_symbol(symbol)
+        data = self._get("/company-notes", params={"symbol": trimmed})
+        return _normalize_list_of_dicts(data, "company-notes")
+
+    def get_income_statement(
+        self,
+        symbol: str,
+        *,
+        period: str = "annual",
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Income statements (annual or quarter)."""
+        return self._get_symbol_period_table(
+            "/income-statement", symbol, period=period, limit=limit
+        )
+
+    def get_balance_sheet_statement(
+        self,
+        symbol: str,
+        *,
+        period: str = "annual",
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Balance sheet statements (annual or quarter)."""
+        return self._get_symbol_period_table(
+            "/balance-sheet-statement", symbol, period=period, limit=limit
+        )
+
+    def get_cash_flow_statement(
+        self,
+        symbol: str,
+        *,
+        period: str = "annual",
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Cash flow statements (annual or quarter)."""
+        return self._get_symbol_period_table(
+            "/cash-flow-statement", symbol, period=period, limit=limit
+        )
+
+    def get_key_metrics(
+        self,
+        symbol: str,
+        *,
+        period: str = "annual",
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Key metrics time series (annual or quarter)."""
+        return self._get_symbol_period_table(
+            "/key-metrics", symbol, period=period, limit=limit
+        )
+
+    def get_key_metrics_ttm(self, symbol: str) -> Any:
+        """Trailing twelve months key metrics (shape may be list or dict depending on FMP)."""
+        trimmed = _require_symbol(symbol)
+        LOGGER.info("Fetching key-metrics-ttm for %s", trimmed)
+        return self._get("/key-metrics-ttm", params={"symbol": trimmed})
+
+    def get_ratios(
+        self,
+        symbol: str,
+        *,
+        period: str = "annual",
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Financial ratios (annual or quarter)."""
+        return self._get_symbol_period_table("/ratios", symbol, period=period, limit=limit)
+
+    def get_ratios_ttm(self, symbol: str) -> Any:
+        """Trailing twelve months ratios (shape may be list or dict depending on FMP)."""
+        trimmed = _require_symbol(symbol)
+        LOGGER.info("Fetching ratios-ttm for %s", trimmed)
+        return self._get("/ratios-ttm", params={"symbol": trimmed})
+
+    def get_enterprise_values(
+        self,
+        symbol: str,
+        *,
+        period: str = "annual",
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Enterprise value history (annual or quarter)."""
+        return self._get_symbol_period_table(
+            "/enterprise-values", symbol, period=period, limit=limit
+        )
+
+    def get_stock_news(self, symbol: str, *, limit: int = 30) -> list[dict[str, Any]]:
+        """Symbol-filtered stock news headlines (``/news/stock``)."""
+        trimmed = _require_symbol(symbol)
+        LOGGER.info("Fetching stock news for %s (limit=%s)", trimmed, limit)
+        params: dict[str, Any] = {"symbols": trimmed, "limit": limit}
+        data = self._get("/news/stock", params=params)
+        return _normalize_list_of_dicts(data, "stock news")
+
+    def get_press_releases(self, symbol: str, *, limit: int = 25) -> list[dict[str, Any]]:
+        """Company press releases for a symbol (``/news/press-releases``)."""
+        trimmed = _require_symbol(symbol)
+        LOGGER.info("Fetching press releases for %s (limit=%s)", trimmed, limit)
+        params: dict[str, Any] = {"symbols": trimmed, "limit": limit}
+        data = self._get("/news/press-releases", params=params)
+        return _normalize_list_of_dicts(data, "press releases")
+
+    def get_ipos_disclosure(self) -> list[dict[str, Any]]:
+        """Global IPO regulatory disclosure listing (filter client-side by symbol / CIK)."""
+        LOGGER.info("Fetching FMP ipos-disclosure (full list)")
+        data = self._get("/ipos-disclosure", params={})
+        return _normalize_list_of_dicts(data, "ipos-disclosure")
+
+    def get_ipos_prospectus(self) -> list[dict[str, Any]]:
+        """Global IPO prospectus listing (filter client-side by symbol / CIK)."""
+        LOGGER.info("Fetching FMP ipos-prospectus (full list)")
+        data = self._get("/ipos-prospectus", params={})
+        return _normalize_list_of_dicts(data, "ipos-prospectus")
+
+    def get_stock_peers(self, symbol: str) -> list[dict[str, Any]]:
+        """Peer / comparable companies (``/stock-peers``)."""
+        trimmed = _require_symbol(symbol)
+        data = self._get("/stock-peers", params={"symbol": trimmed})
+        return _normalize_list_of_dicts(data, "stock-peers")
+
+    def get_key_executives(self, symbol: str) -> list[dict[str, Any]]:
+        """Key executives (``/key-executives``)."""
+        trimmed = _require_symbol(symbol)
+        data = self._get("/key-executives", params={"symbol": trimmed})
+        return _normalize_list_of_dicts(data, "key-executives")
+
+    def get_shares_float(self, symbol: str) -> Any:
+        """Shares float snapshot (``/shares-float``)."""
+        trimmed = _require_symbol(symbol)
+        return self._get("/shares-float", params={"symbol": trimmed})
+
+    def get_quote(self, symbol: str) -> Any:
+        """Real-time style quote (``/quote``; fields depend on FMP / market hours)."""
+        trimmed = _require_symbol(symbol)
+        return self._get("/quote", params={"symbol": trimmed})
+
+    def get_financial_scores(self, symbol: str) -> Any:
+        """Financial health scores e.g. Altman Z, Piotroski (``/financial-scores``)."""
+        trimmed = _require_symbol(symbol)
+        return self._get("/financial-scores", params={"symbol": trimmed})
+
+    def get_analyst_estimates(
+        self,
+        symbol: str,
+        *,
+        period: str = "annual",
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        """Analyst financial estimates (``/analyst-estimates``)."""
+        trimmed = _require_symbol(symbol)
+        params: dict[str, Any] = {
+            "symbol": trimmed,
+            "period": period,
+            "limit": int(limit),
+        }
+        data = self._get("/analyst-estimates", params=params)
+        return _normalize_list_of_dicts(data, "analyst-estimates")
+
+    def get_price_target_summary(self, symbol: str) -> Any:
+        """Analyst price target summary (``/price-target-summary``)."""
+        trimmed = _require_symbol(symbol)
+        return self._get("/price-target-summary", params={"symbol": trimmed})
+
+    def get_price_target_consensus(self, symbol: str) -> Any:
+        """Price target consensus high/low/median (``/price-target-consensus``)."""
+        trimmed = _require_symbol(symbol)
+        return self._get("/price-target-consensus", params={"symbol": trimmed})
+
+    def get_ratings_snapshot(self, symbol: str) -> Any:
+        """Analyst ratings snapshot (``/ratings-snapshot``)."""
+        trimmed = _require_symbol(symbol)
+        return self._get("/ratings-snapshot", params={"symbol": trimmed})
+
+    def get_sec_filings_symbol(
+        self,
+        symbol: str,
+        from_date: str | date | datetime,
+        to_date: str | date | datetime,
+        *,
+        page: int = 0,
+        limit: int = 40,
+    ) -> list[dict[str, Any]]:
+        """SEC filings for symbol in date range (``/sec-filings-search/symbol``)."""
+        trimmed = _require_symbol(symbol)
+        params: dict[str, Any] = {
+            "symbol": trimmed,
+            "from": _format_date(from_date),
+            "to": _format_date(to_date),
+            "page": int(page),
+            "limit": int(limit),
+        }
+        data = self._get("/sec-filings-search/symbol", params=params)
+        return _normalize_list_of_dicts(data, "sec-filings-search/symbol")
+
+    def get_insider_trading_statistics(self, symbol: str) -> Any:
+        """Insider trading aggregates for symbol (``/insider-trading/statistics``)."""
+        trimmed = _require_symbol(symbol)
+        return self._get("/insider-trading/statistics", params={"symbol": trimmed})
+
+    def get_insider_trading_search(
+        self,
+        symbol: str,
+        *,
+        page: int = 0,
+        limit: int = 40,
+    ) -> list[dict[str, Any]]:
+        """Insider trades search (``/insider-trading/search``; symbol filter if supported)."""
+        trimmed = _require_symbol(symbol)
+        params: dict[str, Any] = {
+            "symbol": trimmed,
+            "page": int(page),
+            "limit": int(limit),
+        }
+        data = self._get("/insider-trading/search", params=params)
+        return _normalize_list_of_dicts(data, "insider-trading/search")
+
+    def get_revenue_product_segmentation(self, symbol: str) -> list[dict[str, Any]]:
+        """Revenue by product line (``/revenue-product-segmentation``)."""
+        trimmed = _require_symbol(symbol)
+        data = self._get("/revenue-product-segmentation", params={"symbol": trimmed})
+        return _normalize_list_of_dicts(data, "revenue-product-segmentation")
+
+    def get_revenue_geographic_segmentation(self, symbol: str) -> list[dict[str, Any]]:
+        """Revenue by geography (``/revenue-geographic-segmentation``)."""
+        trimmed = _require_symbol(symbol)
+        data = self._get("/revenue-geographic-segmentation", params={"symbol": trimmed})
+        return _normalize_list_of_dicts(data, "revenue-geographic-segmentation")
+
+    def get_treasury_rates(self) -> list[dict[str, Any]]:
+        """Treasury yield curve time series (``/treasury-rates``)."""
+        LOGGER.info("Fetching treasury rates")
+        data = self._get("/treasury-rates", params={})
+        return _normalize_list_of_dicts(data, "treasury-rates")
+
+    def get_market_risk_premium(self) -> Any:
+        """Equity market risk premium (``/market-risk-premium``)."""
+        LOGGER.info("Fetching market risk premium")
+        return self._get("/market-risk-premium", params={})
+
+    def get_economic_calendar(
+        self,
+        from_date: str | date | datetime,
+        to_date: str | date | datetime,
+    ) -> list[dict[str, Any]]:
+        """Scheduled macro data releases (``/economic-calendar``)."""
+        params = {
+            "from": _format_date(from_date),
+            "to": _format_date(to_date),
+        }
+        LOGGER.info(
+            "Fetching economic calendar %s .. %s", params["from"], params["to"]
+        )
+        data = self._get("/economic-calendar", params=params)
+        return _normalize_list_of_dicts(data, "economic-calendar")
+
+    def get_economic_indicators(self, name: str) -> list[dict[str, Any]]:
+        """Macro indicator series (``/economic-indicators``); ``name`` e.g. GDP, unemploymentRate."""
+        label = name.strip()
+        if not label:
+            raise ValueError("economic indicator name must be non-empty")
+        LOGGER.info("Fetching economic indicators name=%s", label)
+        data = self._get("/economic-indicators", params={"name": label})
+        return _normalize_list_of_dicts(data, f"economic-indicators:{label}")
+
+    def get_sector_performance_snapshot(
+        self, as_of: str | date | datetime
+    ) -> list[dict[str, Any]]:
+        """ALL sectors — one-day performance snapshot (``/sector-performance-snapshot``)."""
+        params = {"date": _format_date(as_of)}
+        data = self._get("/sector-performance-snapshot", params=params)
+        return _normalize_list_of_dicts(data, "sector-performance-snapshot")
+
+    def get_industry_performance_snapshot(
+        self, as_of: str | date | datetime
+    ) -> list[dict[str, Any]]:
+        """ALL industries — one-day snapshot (``/industry-performance-snapshot``)."""
+        params = {"date": _format_date(as_of)}
+        data = self._get("/industry-performance-snapshot", params=params)
+        return _normalize_list_of_dicts(data, "industry-performance-snapshot")
+
+    def get_sector_pe_snapshot(
+        self, as_of: str | date | datetime
+    ) -> list[dict[str, Any]]:
+        """Sector valuation P/E snapshot (``/sector-pe-snapshot``)."""
+        params = {"date": _format_date(as_of)}
+        data = self._get("/sector-pe-snapshot", params=params)
+        return _normalize_list_of_dicts(data, "sector-pe-snapshot")
+
+    def get_industry_pe_snapshot(
+        self, as_of: str | date | datetime
+    ) -> list[dict[str, Any]]:
+        """Industry P/E snapshot (``/industry-pe-snapshot``)."""
+        params = {"date": _format_date(as_of)}
+        data = self._get("/industry-pe-snapshot", params=params)
+        return _normalize_list_of_dicts(data, "industry-pe-snapshot")
+
+    def get_historical_sector_performance(self, sector: str) -> list[dict[str, Any]]:
+        """Time series of sector performance for one sector (``/historical-sector-performance``)."""
+        label = sector.strip()
+        if not label:
+            raise ValueError("sector must be a non-empty string")
+        data = self._get("/historical-sector-performance", params={"sector": label})
+        return _normalize_list_of_dicts(data, "historical-sector-performance")
+
+    def get_historical_industry_performance(self, industry: str) -> list[dict[str, Any]]:
+        """Time series of industry performance (``/historical-industry-performance``)."""
+        label = industry.strip()
+        if not label:
+            raise ValueError("industry must be a non-empty string")
+        data = self._get("/historical-industry-performance", params={"industry": label})
+        return _normalize_list_of_dicts(data, "historical-industry-performance")
+
+    def get_etf_sector_weightings(self, symbol: str = "SPY") -> list[dict[str, Any]]:
+        """ETF / index basket sector breakdown (e.g. SPY) — ``/etf/sector-weightings``."""
+        trimmed = _require_symbol(symbol)
+        data = self._get("/etf/sector-weightings", params={"symbol": trimmed})
+        return _normalize_list_of_dicts(data, "etf/sector-weightings")
+
+    def get_batch_quote(self, symbols: list[str]) -> list[dict[str, Any]]:
+        """Multiple symbols in one call (``/batch-quote``)."""
+        parts = [s.strip().upper() for s in symbols if s and str(s).strip()]
+        if not parts:
+            return []
+        params = {"symbols": ",".join(parts)}
+        data = self._get("/batch-quote", params=params)
+        return _normalize_list_of_dicts(data, "batch-quote")
+
     def get_stock_price_historical(
         self,
         symbol: str,
@@ -142,6 +475,32 @@ class FMPClient:
         )
         data = self._get("/historical-price-eod/full", params=params)
         return _normalize_historical_rows(data)
+
+    def _get_symbol_period_table(
+        self,
+        path: str,
+        symbol: str,
+        *,
+        period: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        trimmed = _require_symbol(symbol)
+        if period not in ("annual", "quarter"):
+            raise ValueError("period must be 'annual' or 'quarter'")
+        LOGGER.info(
+            "Fetching %s for %s period=%s limit=%s",
+            path,
+            trimmed,
+            period,
+            limit,
+        )
+        params: dict[str, Any] = {
+            "symbol": trimmed,
+            "period": period,
+            "limit": int(limit),
+        }
+        data = self._get(path, params=params)
+        return _normalize_list_of_dicts(data, path)
 
     def _get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         request_params = dict(params or {})
@@ -188,6 +547,29 @@ class FMPClient:
                 self._retry_max_wait_seconds,
             )
         )
+
+
+def _require_symbol(symbol: str) -> str:
+    trimmed = symbol.strip().upper()
+    if not trimmed:
+        raise ValueError("symbol must be a non-empty string")
+    return trimmed
+
+
+def _normalize_list_of_dicts(payload: Any, label: str) -> list[dict[str, Any]]:
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        rows = [x for x in payload if isinstance(x, dict)]
+        if len(rows) != len(payload):
+            raise FMPAPIError(f"{label}: list contained non-object entries")
+        return rows
+    if isinstance(payload, dict):
+        # Some endpoints may return a single row as object
+        return [payload]
+    raise FMPAPIError(
+        f"{label}: unexpected payload type {type(payload).__name__}"
+    )
 
 
 def _normalize_historical_rows(payload: Any) -> list[dict[str, Any]]:

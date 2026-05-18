@@ -22,3 +22,7 @@ description = "IPO 自动化研报"
 
 [outputs]
   home = ["HTML"]
+
+# Default page size; can be overridden per build via data/novasignal_build.yml + index template
+[pagination]
+  pagerSize = 20

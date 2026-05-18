@@ -23,8 +23,10 @@ class GitHubPagesTest(unittest.TestCase):
             items = sync_reports_to_hugo(r2, hugo, limit=10)
             out = hugo / "content" / "reports" / "2026-01-10-ZZZ.md"
             self.assertTrue(out.is_file())
-            self.assertIn("symbol: ZZZ", out.read_text(encoding="utf-8"))
-            self.assertIn("slug: 2026-01-10-ZZZ", out.read_text(encoding="utf-8"))
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("symbol: ZZZ", text)
+            self.assertIn("slug: 2026-01-10-ZZZ", text)
+            self.assertIn("weight: 0", text)
 
         self.assertEqual(len(items), 3)
         self.assertEqual(items[0][0], "2026-01-10")
@@ -44,10 +46,10 @@ class GitHubPagesTest(unittest.TestCase):
             hugo = Path(tmp) / "hugo"
             (hugo / "content" / "reports").mkdir(parents=True)
             (hugo / "data").mkdir(parents=True)
-            prepare_hugo_site(hugo, limit=10, home_report_limit=15)
+            prepare_hugo_site(hugo, limit=10, reports_per_page=15)
             data = (hugo / "data" / "novasignal_build.yml").read_text(encoding="utf-8")
 
-        self.assertIn("home_report_limit: 15", data)
+        self.assertIn("reports_per_page: 15", data)
 
 
 if __name__ == "__main__":

@@ -59,10 +59,71 @@ class FilterAlreadyProcessedTest(unittest.TestCase):
         result = _filter_already_processed(r2, discovered)
         self.assertEqual(len(result), 2)
 
+    def test_malformed_or_stray_keys_ignored(self):
+        from src.orchestrator.run_pipeline import _filter_already_processed
+        r2 = MagicMock()
+        r2.list_objects.return_value = [
+            "reports/2026-01-01/AAPL_report.md",
+            "reports/2026-01-01/notes.tmp",
+            "reports/2026-01-01/random.md",
+            "wrong-prefix/2026-01-01/X_report.md",
+        ]
+        discovered = [{"symbol": "AAPL"}, {"symbol": "GOOG"}]
+        result = _filter_already_processed(r2, discovered)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["symbol"], "GOOG")
+
+
+def _fmp_mock_for_raw_data() -> MagicMock:
+    fmp = MagicMock()
+    fmp.get_company_profile.return_value = None
+    fmp.get_income_statement.return_value = []
+    fmp.get_balance_sheet_statement.return_value = []
+    fmp.get_cash_flow_statement.return_value = []
+    fmp.get_key_metrics.return_value = []
+    fmp.get_ratios.return_value = []
+    fmp.get_enterprise_values.return_value = []
+    fmp.get_key_metrics_ttm.return_value = None
+    fmp.get_ratios_ttm.return_value = None
+    fmp.get_stock_price_historical.return_value = []
+    fmp.get_stock_news.return_value = []
+    fmp.get_press_releases.return_value = []
+    fmp.get_ipos_disclosure.return_value = []
+    fmp.get_ipos_prospectus.return_value = []
+    fmp.get_quote.return_value = None
+    fmp.get_stock_peers.return_value = []
+    fmp.get_key_executives.return_value = []
+    fmp.get_shares_float.return_value = None
+    fmp.get_financial_scores.return_value = None
+    fmp.get_analyst_estimates.return_value = []
+    fmp.get_price_target_summary.return_value = None
+    fmp.get_price_target_consensus.return_value = None
+    fmp.get_ratings_snapshot.return_value = None
+    fmp.get_sec_filings_symbol.return_value = []
+    fmp.get_insider_trading_statistics.return_value = None
+    fmp.get_insider_trading_search.return_value = []
+    fmp.get_revenue_product_segmentation.return_value = []
+    fmp.get_revenue_geographic_segmentation.return_value = []
+    fmp.get_company_notes.return_value = []
+    fmp.get_treasury_rates.return_value = []
+    fmp.get_market_risk_premium.return_value = None
+    fmp.get_economic_calendar.return_value = []
+    fmp.get_economic_indicators.return_value = []
+    fmp.get_sector_performance_snapshot.return_value = []
+    fmp.get_industry_performance_snapshot.return_value = []
+    fmp.get_sector_pe_snapshot.return_value = []
+    fmp.get_industry_pe_snapshot.return_value = []
+    fmp.get_historical_sector_performance.return_value = []
+    fmp.get_historical_industry_performance.return_value = []
+    fmp.get_etf_sector_weightings.return_value = []
+    fmp.get_batch_quote.return_value = []
+    return fmp
+
 
 class BuildRawDataTest(unittest.TestCase):
     def test_builds_data_with_cik(self):
-        fmp = MagicMock()
+        fmp = _fmp_mock_for_raw_data()
+        fmp.get_company_profile.return_value = {"sector": "Software", "cik": "0001234567"}
         fmp.get_fundraising.return_value = [{"round": "series-a"}]
         entry = {"symbol": "TEST", "cik": "0001234567", "exchange": "NASDAQ"}
 
@@ -72,24 +133,105 @@ class BuildRawDataTest(unittest.TestCase):
         self.assertIn("timestamp", result)
         self.assertEqual(result["ipo_data"]["exchange"], "NASDAQ")
         self.assertEqual(result["fundraising"], [{"round": "series-a"}])
+        self.assertEqual(result["resolved_cik"], "0001234567")
         fmp.get_fundraising.assert_called_once_with("0001234567")
 
+    def test_resolves_cik_from_profile_when_entry_missing(self):
+        fmp = _fmp_mock_for_raw_data()
+        fmp.get_company_profile.return_value = {"cik": "320193", "sector": "Tech"}
+        fmp.get_fundraising.return_value = [{"s": 1}]
+        entry = {"symbol": "AAPL"}
+
+        result = _build_raw_data(entry, fmp)
+
+        self.assertEqual(result["resolved_cik"], "0000320193")
+        fmp.get_fundraising.assert_called_once_with("0000320193")
+
     def test_builds_data_without_cik(self):
-        fmp = MagicMock()
+        fmp = _fmp_mock_for_raw_data()
+        fmp.get_company_profile.return_value = {}
         entry = {"symbol": "NOCIK", "date": "2026-01-01"}
 
         result = _build_raw_data(entry, fmp)
 
         self.assertEqual(result["fundraising"], [])
+        self.assertIsNone(result["resolved_cik"])
         fmp.get_fundraising.assert_not_called()
 
     def test_fundraising_failure_non_fatal(self):
-        fmp = MagicMock()
+        fmp = _fmp_mock_for_raw_data()
         fmp.get_fundraising.side_effect = Exception("API error")
         entry = {"symbol": "ERR", "cik": "000111"}
 
         result = _build_raw_data(entry, fmp)
         self.assertEqual(result["fundraising"], [])
+        self.assertTrue(any(e["step"] == "fundraising" for e in result["fetch_errors"]))
+
+    def test_enrichment_shapes(self):
+        fmp = _fmp_mock_for_raw_data()
+        fmp.get_company_profile.return_value = {"companyName": "X"}
+        fmp.get_income_statement.side_effect = [
+            [{"fiscalYear": "2024"}],
+            [{"period": "Q1"}],
+        ]
+        fmp.get_balance_sheet_statement.return_value = [{"totalAssets": 1}]
+        fmp.get_stock_price_historical.side_effect = [
+            [{"date": "2026-01-10", "close": 10}],
+            [{"date": "2026-01-10", "close": 100}],
+        ]
+        fmp.get_stock_news.return_value = [{"title": "n1"}]
+        entry = {"symbol": "ZZ", "date": "2025-06-01"}
+
+        result = _build_raw_data(entry, fmp)
+
+        self.assertEqual(result["company_profile"]["companyName"], "X")
+        self.assertEqual(len(result["financials"]["income_statement_annual"]), 1)
+        self.assertEqual(result["market_context"]["company_eod_recent"][0]["close"], 10)
+        self.assertEqual(result["news_context"]["stock_news"][0]["title"], "n1")
+        self.assertIn("fmp_profile", result["data_sources"])
+
+    def test_ipo_regulatory_matches_prefetched_lists(self):
+        fmp = _fmp_mock_for_raw_data()
+        fmp.get_company_profile.return_value = {}
+        lists = {
+            "disclosures": [
+                {"symbol": "ABC", "form": "S-1"},
+                {"symbol": "ZZZ"},
+            ],
+            "prospectuses": [{"ticker": "ABC", "url": "https://sec.gov/x"}],
+        }
+        result = _build_raw_data({"symbol": "ABC"}, fmp, ipo_regulatory_lists=lists)
+        self.assertEqual(
+            result["ipo_regulatory_context"]["disclosure_filings_matched"],
+            [{"symbol": "ABC", "form": "S-1"}],
+        )
+        self.assertEqual(
+            result["ipo_regulatory_context"]["prospectus_entries_matched"],
+            [{"ticker": "ABC", "url": "https://sec.gov/x"}],
+        )
+
+    def test_global_market_prefetch_compacted_into_raw_data(self):
+        fmp = _fmp_mock_for_raw_data()
+        fmp.get_company_profile.return_value = {}
+        cache = {
+            "prefetch_as_of": "2026-01-01",
+            "treasury_rates": [{"d": i} for i in range(40)],
+            "market_risk_premium": {"usa": 5.0},
+            "economic_calendar": [{"e": i} for i in range(60)],
+            "economic_indicators": {"GDP": [{"v": i} for i in range(20)]},
+            "sector_performance_snapshot": [],
+            "industry_performance_snapshot": [],
+            "sector_pe_snapshot": [],
+            "industry_pe_snapshot": [],
+            "etf_sector_weightings_spy": [{"s": "Tech"}],
+            "major_index_batch_quotes": [],
+        }
+        result = _build_raw_data({"symbol": "X"}, fmp, global_market_context=cache)
+        gmc = result["global_market_context"]
+        self.assertIsNotNone(gmc)
+        self.assertEqual(len(gmc["treasury_rates_tail"]), 30)
+        self.assertEqual(len(gmc["economic_calendar"]), 50)
+        self.assertEqual(len(gmc["economic_indicators_trimmed"]["GDP"]), 14)
 
 
 class LoadPromptTest(unittest.TestCase):
@@ -103,6 +245,22 @@ class LoadPromptTest(unittest.TestCase):
     def test_missing_file_raises_pipeline_error(self):
         with self.assertRaises(PipelineError):
             _load_prompt("/nonexistent/path.md")
+
+
+class ParseReportStorageKeyTest(unittest.TestCase):
+    def test_parses_canonical_key(self):
+        from src.storage.r2_client import parse_report_storage_key
+
+        self.assertEqual(
+            parse_report_storage_key("reports/2026-01-01/BRK.B_report.md"),
+            ("2026-01-01", "BRK.B"),
+        )
+
+    def test_rejects_noncanonical(self):
+        from src.storage.r2_client import parse_report_storage_key
+
+        self.assertIsNone(parse_report_storage_key("reports/2026-01-01/foo.md"))
+        self.assertIsNone(parse_report_storage_key("metrics/2026-01-01/AAPL_metrics.json"))
 
 
 class RunPipelineTest(unittest.TestCase):
@@ -131,8 +289,7 @@ class RunPipelineTest(unittest.TestCase):
     @patch("src.orchestrator.run_pipeline.SandboxManager")
     def test_production_mode_full_flow(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory, mock_r2_factory):
         # Setup FMP
-        fmp = MagicMock()
-        fmp.get_fundraising.return_value = []
+        fmp = _fmp_mock_for_raw_data()
         mock_fmp_factory.return_value = fmp
 
         # Setup sandbox
@@ -169,16 +326,47 @@ class RunPipelineTest(unittest.TestCase):
         self.assertEqual(result["mode"], "production")
         self.assertEqual(result["success_count"], 1)
         self.assertEqual(result["failure_count"], 0)
+        mock_r2.upload_fmp_prefetch_bundle.assert_called_once()
+        mock_r2.upload_raw_data.assert_called_once()
         mock_r2.upload_report.assert_called_once()
         mock_r2.upload_metrics.assert_called_once()
         mock_sandbox.cleanup.assert_called_once()
+
+    @patch("src.orchestrator.run_pipeline._create_r2_client")
+    @patch("src.orchestrator.run_pipeline._create_fmp_client")
+    @patch("src.orchestrator.run_pipeline.invoke_agent")
+    @patch("src.orchestrator.run_pipeline.SandboxManager")
+    def test_production_skip_upload_does_not_touch_r2(
+        self, mock_sandbox_cls, mock_invoke, mock_fmp_factory, mock_r2_factory
+    ):
+        fmp = _fmp_mock_for_raw_data()
+        mock_fmp_factory.return_value = fmp
+        mock_sandbox = MagicMock()
+        mock_sandbox_cls.return_value = mock_sandbox
+        mock_context = MagicMock()
+        mock_context.sandbox_dir = Path("/tmp/fake")
+        mock_sandbox.create.return_value = mock_context
+        mock_sandbox.extract_results.return_value = {"report": "# R", "metrics": {}}
+        mock_invoke.return_value = MagicMock(success=True)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("Prompt")
+            prompt_path = f.name
+        result = run_pipeline(
+            mode="production",
+            symbols=["AAPL"],
+            prompt_path=prompt_path,
+            skip_upload=True,
+            concurrency=1,
+            sandbox_timeout=10,
+        )
+        self.assertEqual(result["success_count"], 1)
+        mock_r2_factory.assert_not_called()
 
     @patch("src.orchestrator.run_pipeline._create_fmp_client")
     @patch("src.orchestrator.run_pipeline.invoke_agent")
     @patch("src.orchestrator.run_pipeline.SandboxManager")
     def test_dev_mode_skips_upload(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory):
-        fmp = MagicMock()
-        fmp.get_fundraising.return_value = []
+        fmp = _fmp_mock_for_raw_data()
         mock_fmp_factory.return_value = fmp
 
         mock_sandbox = MagicMock()
@@ -209,8 +397,7 @@ class RunPipelineTest(unittest.TestCase):
     def test_agent_failure_captured(self, mock_sandbox_cls, mock_invoke, mock_fmp_factory):
         from src.orchestrator.async_runner import AgentRunError
 
-        fmp = MagicMock()
-        fmp.get_fundraising.return_value = []
+        fmp = _fmp_mock_for_raw_data()
         mock_fmp_factory.return_value = fmp
 
         mock_sandbox = MagicMock()

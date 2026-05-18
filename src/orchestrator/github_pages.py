@@ -9,20 +9,13 @@ from typing import Any
 
 import yaml
 
-from src.storage.r2_client import R2Client
+from src.storage.r2_client import R2Client, parse_report_storage_key
 
 LOGGER = logging.getLogger(__name__)
 
-_REPORT_KEY = re.compile(
-    r"^reports/(?P<date>\d{4}-\d{2}-\d{2})/(?P<symbol>[^/]+)_report\.md$"
-)
-
 
 def _parse_report_key(key: str) -> tuple[str, str] | None:
-    m = _REPORT_KEY.match(key)
-    if not m:
-        return None
-    return m.group("date"), m.group("symbol").replace("_report", "").replace(".md", "")
+    return parse_report_storage_key(key)
 
 
 def _safe_stem_symbol(symbol: str) -> str:
@@ -77,7 +70,7 @@ def sync_reports_to_hugo(
 
     reports_dir = hugo_root / "content" / "reports"
     meta: list[tuple[str, str, str]] = []
-    for date_str, symbol, key in selected:
+    for idx, (date_str, symbol, key) in enumerate(selected):
         body = r2.download_file(key).decode("utf-8", errors="replace")
         basename = _report_basename(date_str, symbol)
         out = reports_dir / f"{basename}.md"
@@ -87,6 +80,7 @@ def sync_reports_to_hugo(
             "report_date": date_str,
             "date": f"{date_str}T00:00:00Z",
             "slug": basename,
+            "weight": idx,
         }
         _write_front_matter_md(out, front=front, body=body)
         url_path = f"/reports/{basename}/"
@@ -96,13 +90,13 @@ def sync_reports_to_hugo(
     return meta
 
 
-def _write_build_data(hugo_root: Path, *, home_report_limit: int) -> None:
+def _write_build_data(hugo_root: Path, *, reports_per_page: int) -> None:
     data_dir = hugo_root / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     build_path = data_dir / "novasignal_build.yml"
     build_path.write_text(
         yaml.safe_dump(
-            {"home_report_limit": home_report_limit},
+            {"reports_per_page": reports_per_page},
             allow_unicode=True,
             default_flow_style=False,
         ),
@@ -114,11 +108,11 @@ def prepare_hugo_site(
     hugo_root: str | Path = "hugo",
     *,
     limit: int = 50,
-    home_report_limit: int = 20,
+    reports_per_page: int = 20,
 ) -> None:
     """Pull reports from R2 into the Hugo tree (requires R2 env vars)."""
     root = Path(hugo_root)
-    _write_build_data(root, home_report_limit=home_report_limit)
+    _write_build_data(root, reports_per_page=reports_per_page)
     r2 = R2Client()
     sync_reports_to_hugo(r2, root, limit=limit)
 
@@ -141,14 +135,14 @@ def main() -> None:
         "--max-links",
         type=int,
         default=20,
-        help="Max reports on home page (writes data/novasignal_build.yml)",
+        help="Reports per page on home (pagination; writes data/novasignal_build.yml)",
     )
     args = parser.parse_args()
     configure_logging()
     prepare_hugo_site(
         args.hugo_dir,
         limit=args.limit,
-        home_report_limit=args.max_links,
+        reports_per_page=args.max_links,
     )
 
 

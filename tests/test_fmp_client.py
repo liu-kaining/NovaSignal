@@ -202,6 +202,58 @@ class FMPClientTest(unittest.TestCase):
         self.assertEqual(client.base_url, "https://cfg.example/stable")
         self.assertEqual(client.timeout_seconds, 99)
 
+    def test_get_income_statement_uses_period_and_limit(self):
+        session = FakeSession([FakeResponse([{"revenue": 100}])])
+        client = FMPClient(
+            api_key="test-key",
+            base_url="https://example.test/stable",
+            session=session,
+        )
+        rows = client.get_income_statement("Nvda", period="quarter", limit=3)
+        self.assertEqual(rows, [{"revenue": 100}])
+        self.assertEqual(session.calls[0]["url"], "https://example.test/stable/income-statement")
+        self.assertEqual(session.calls[0]["params"]["symbol"], "NVDA")
+        self.assertEqual(session.calls[0]["params"]["period"], "quarter")
+        self.assertEqual(session.calls[0]["params"]["limit"], 3)
+
+    def test_get_stock_news_hits_news_stock_path(self):
+        session = FakeSession([FakeResponse([{"title": "Hello"}])])
+        client = FMPClient(
+            api_key="test-key",
+            base_url="https://example.test/stable",
+            session=session,
+        )
+        news = client.get_stock_news("AAPL", limit=5)
+        self.assertEqual(news, [{"title": "Hello"}])
+        self.assertEqual(session.calls[0]["url"], "https://example.test/stable/news/stock")
+        self.assertEqual(session.calls[0]["params"]["symbols"], "AAPL")
+        self.assertEqual(session.calls[0]["params"]["limit"], 5)
+
+    def test_get_ipos_disclosure_hits_stable_path(self):
+        session = FakeSession([FakeResponse([{"cik": "1"}])])
+        client = FMPClient(
+            api_key="test-key",
+            base_url="https://example.test/stable",
+            session=session,
+        )
+        rows = client.get_ipos_disclosure()
+        self.assertEqual(rows, [{"cik": "1"}])
+        self.assertEqual(session.calls[0]["url"], "https://example.test/stable/ipos-disclosure")
+
+    def test_get_batch_quote_joins_symbols(self):
+        session = FakeSession([FakeResponse([{"symbol": "^GSPC"}])])
+        client = FMPClient(
+            api_key="test-key",
+            base_url="https://example.test/stable",
+            session=session,
+        )
+        rows = client.get_batch_quote(["^GSPC", "^VIX"])
+        self.assertEqual(rows, [{"symbol": "^GSPC"}])
+        self.assertEqual(
+            session.calls[0]["url"], "https://example.test/stable/batch-quote"
+        )
+        self.assertEqual(session.calls[0]["params"]["symbols"], "^GSPC,^VIX")
+
 
 if __name__ == "__main__":
     unittest.main()
