@@ -64,7 +64,7 @@
 | **数据源 (Data)** | Financial Modeling Prep | 全量提供美港股 IPO 日历、财务报表、实时报价。 |
 | **执行引擎 (AI)** | Python 3.11 + Claude Code | Python 作为 Orchestrator，异步唤醒 Claude Agent 进程。 |
 | **存储 (Data Lake)** | Cloudflare R2 | 永久存储 Markdown 报告、JSON 快照及任务状态日志。 |
-| **分发与展示** | GitHub Pages + Jekyll | 静态站构建，零成本全球 CDN 加速。 |
+| **分发与展示** | GitHub Pages + Hugo | 静态站构建，零成本全球 CDN 加速。 |
 
 ### 3.3 核心引擎机制：异步沙盒模式 (Sandbox Pattern)
 
@@ -97,7 +97,7 @@ novasignal/
 │   └── meta_review_template.md   
 ├── config/
 │   └── settings.yaml             # 阈值配置与全局变量
-└── site/                         # 静态站源码
+└── hugo/                         # Hugo 站点源码（CI 产出 ../site 发布）
 
 ```
 

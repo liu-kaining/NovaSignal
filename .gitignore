@@ -167,6 +167,9 @@ venv.bak/
 # mkdocs documentation
 /site
 
+# Hugo: reports synced locally from R2 (CI generates each run)
+/hugo/content/reports/*.md
+
 # mypy
 .mypy_cache/
 .dmypy.json

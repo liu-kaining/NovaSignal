@@ -1,0 +1,24 @@
+baseURL = "https://novasignal.thetamind.ai/"
+languageCode = "zh-cn"
+title = "NovaSignal"
+enableRobotsTXT = false
+
+[params]
+description = "IPO 自动化研报"
+
+[permalinks]
+  reports = "/reports/:slug/"
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.parser]
+      [markup.goldmark.parser.attribute]
+        block = true
+    [markup.goldmark.renderer]
+      unsafe = false
+  [markup.highlight]
+    style = "github"
+    noClasses = true
+
+[outputs]
+  home = ["HTML"]

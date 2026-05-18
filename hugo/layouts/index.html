@@ -1,0 +1,22 @@
+{{ define "title" }}NovaSignal 研报{{ end }}
+{{ define "main" }}
+  {{ $lim := 20 }}
+  {{ with site.Data.novasignal_build }}{{ with .home_report_limit }}{{ $lim = int . }}{{ end }}{{ end }}
+  {{ $reports := where site.RegularPages "Section" "reports" }}
+  {{ $sorted := sort $reports "Date" "desc" }}
+<header class="hero">
+  <h1>NovaSignal 研报</h1>
+  <p>IPO 情报 · 流水线自动生成 · Hugo 渲染</p>
+  <div class="stats">已同步 {{ len $reports }} 份 · 本页展示 {{ $lim }} 份</div>
+</header>
+<ul class="report-list">
+  {{ range first $lim $sorted }}
+  <li>
+    <a href="{{ .RelPermalink }}">
+      <span class="sym">{{ .Params.symbol }}</span>
+      <span class="dt">{{ .Params.report_date }}</span>
+    </a>
+  </li>
+  {{ end }}
+</ul>
+{{ end }}

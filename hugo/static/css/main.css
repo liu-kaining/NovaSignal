@@ -1,0 +1,202 @@
+:root {
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --text: #1a1d26;
+  --muted: #5c6370;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --border: #e2e5ec;
+  --radius: 12px;
+  --shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+.wrap {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+.nav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+}
+
+.nav-back:hover { color: var(--accent); }
+
+article.report {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 2rem 2.25rem;
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+article.report h1 {
+  font-size: 1.75rem;
+  margin-top: 0;
+  letter-spacing: -0.02em;
+}
+
+article.report h2 {
+  font-size: 1.2rem;
+  margin-top: 2rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+article.report h3 { font-size: 1.05rem; margin-top: 1.5rem; }
+
+article.report p,
+article.report li { color: var(--text); }
+
+article.report ul,
+article.report ol { padding-left: 1.35rem; }
+
+article.report code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+  background: #f0f2f7;
+  padding: 0.12em 0.4em;
+  border-radius: 4px;
+}
+
+article.report pre {
+  background: #1a1d26;
+  color: #e8eaef;
+  padding: 1rem 1.15rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.86rem;
+}
+
+article.report pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+article.report blockquote {
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 4px solid var(--accent);
+  background: #f0f5ff;
+  color: var(--muted);
+}
+
+article.report table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+article.report th,
+article.report td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+}
+
+article.report th { background: #f8f9fc; }
+
+article.report hr {
+  margin: 2.5rem 0;
+  border: none;
+  border-top: 2px dashed var(--border);
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+footer.site-footer {
+  margin-top: 3rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.hero {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 55%, #3b82f6 100%);
+  color: #fff;
+  padding: 3rem 1.25rem 2.75rem;
+  margin: -2rem -1.25rem 2rem;
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.hero h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.85rem;
+  letter-spacing: -0.03em;
+}
+
+.hero p { margin: 0; opacity: 0.92; font-size: 1rem; }
+
+.stats {
+  background: rgba(255, 255, 255, 0.15);
+  display: inline-block;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  margin-top: 1rem;
+}
+
+.report-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.report-list li { margin: 0 0 0.65rem; }
+
+.report-list a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.report-list a:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.12);
+  text-decoration: none;
+}
+
+.sym { font-weight: 600; letter-spacing: 0.02em; }
+
+.dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}

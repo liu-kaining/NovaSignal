@@ -1,0 +1,8 @@
+{{ define "title" }}{{ .Title }}{{ end }}
+{{ define "main" }}
+<a class="nav-back" href="{{ "/" | relURL }}">← 返回报告列表</a>
+<p class="meta">标的 <strong>{{ .Params.symbol }}</strong> · 日期 {{ .Params.report_date }}</p>
+<article class="report prose">
+  {{ .Content }}
+</article>
+{{ end }}
